@@ -1,0 +1,141 @@
+spring:
+  application:
+    name: backend
+  docker:
+    compose:
+      file: ../docker-compose.yaml
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  datasource:
+    hikari:
+      # 20 (was 10): at 2-8 ECS replicas (infra/lib/backend-service-stack.ts),
+      # that's 40-160 total connections against the T4G.medium RDS
+      # instance's ~450 max_connections - comfortable headroom even at max
+      # scale, and worth raising since the old default of 10 meant only 10
+      # of Tomcat's ~200 default request-handler threads could ever hold a
+      # DB connection at once (see server.tomcat.threads.max below).
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:20}
+      minimum-idle: ${DB_POOL_MIN_IDLE:2}
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  cache:
+    type: redis
+
+server:
+  tomcat:
+    threads:
+      # Spring Boot's own default is 200 - with a 10-connection Hikari pool
+      # that meant 190 requests could pile up waiting on 10 DB connections
+      # before ever timing out, turning a load spike into a latency cliff
+      # instead of graceful backpressure. 50 stays comfortably above the
+      # Hikari pool (above, now 20) so cache-hit/DB-free requests aren't
+      # needlessly starved, while capping how many requests can queue behind
+      # a saturated DB pool at once.
+      max: ${TOMCAT_THREADS_MAX:50}
+
+management:
+  # Actuator (including /prometheus) is served on its own port, entirely separate
+  # from the public API on server.port. It never passes through SecurityConfig's
+  # JWT filter chain — keep this port off any public load balancer / internet-facing
+  # listener in real deployments; only your scraper/ops network should reach it.
+  server:
+    port: ${MANAGEMENT_PORT:9090}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+logging:
+  level:
+    root: ${LOG_LEVEL_ROOT:INFO}
+    com.escld.backend: ${LOG_LEVEL_APP:DEBUG}
+  # Set LOG_FORMAT=ecs (or logstash) for JSON logs in real deployments (log
+  # aggregators). Left as plain text by default — far more readable in a
+  # terminal / `docker compose logs` during local dev.
+  structured:
+    format:
+      console: ${LOG_FORMAT:}
+
+app:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  cognito:
+    issuer-uri: ${COGNITO_ISSUER_URI:https://cognito-idp.eu-central-1.amazonaws.com/eu-central-1_ESOikZUZv}
+    app-client-id: ${COGNITO_APP_CLIENT_ID:38h4lsvt0ujkjv2qoc9dobj8hv}
+    region: ${AWS_REGION:eu-central-1}
+  media:
+    bucket-name: ${MEDIA_BUCKET_NAME:}
+    region: ${MEDIA_BUCKET_REGION:eu-central-1}
+    cloudfront-domain: ${MEDIA_CLOUDFRONT_DOMAIN:}
+    presign-expiration-minutes: ${MEDIA_PRESIGN_EXPIRATION_MINUTES:15}
+  dynamodb:
+    region: ${AWS_REGION:eu-central-1}
+    endpoint: ${DYNAMODB_ENDPOINT:}
+    table-name: ${DYNAMODB_FOLLOWS_TABLE:follows}
+    feed-table-name: ${DYNAMODB_FEED_TABLE:feed}
+    moderation-table-name: ${DYNAMODB_MODERATION_TABLE:moderation}
+    likes-table-name: ${DYNAMODB_LIKES_TABLE:likes}
+    post-hides-table-name: ${DYNAMODB_POST_HIDES_TABLE:post_hides}
+    domain-outbox-table-name: ${DYNAMODB_DOMAIN_OUTBOX_TABLE:domain_outbox}
+    insights-table-name: ${DYNAMODB_INSIGHTS_TABLE:insights}
+  sqs:
+    endpoint: ${SQS_ENDPOINT:}
+    transcode-queue-url: ${SQS_TRANSCODE_QUEUE_URL:}
+    post-events-queue-url: ${SQS_POST_EVENTS_QUEUE_URL:}
+  analytics:
+    events-channel: ${ANALYTICS_EVENTS_CHANNEL:analytics-events}
+    observation-token-ttl: ${OBSERVATION_TOKEN_TTL:24h}
+    ingress:
+      max-request-bytes: ${ANALYTICS_MAX_REQUEST_BYTES:65536}
+      rate-enabled: ${ANALYTICS_RATE_LIMIT_ENABLED:true}
+      rate-capacity: ${ANALYTICS_RATE_LIMIT_CAPACITY:20}
+      refill-tokens: ${ANALYTICS_RATE_LIMIT_REFILL_TOKENS:120}
+      refill-duration: ${ANALYTICS_RATE_LIMIT_REFILL_DURATION:1m}
+  feed:
+    snapshot-ttl: ${FEED_SNAPSHOT_TTL:15m}
+    cursor-signing-key: ${FEED_CURSOR_SIGNING_KEY:local-development-feed-cursor-key-change-me}
+  kafka:
+    # Off by default — local dev (docker-compose) has no MSK cluster to talk
+    # to, and KafkaConfig's producer bean is entirely skipped when this is
+    # false (see @ConditionalOnProperty there), so nothing attempts a real
+    # AWS API call unless explicitly turned on.
+    enabled: ${KAFKA_ENABLED:false}
+    cluster-arn: ${KAFKA_CLUSTER_ARN:}
+    region: ${AWS_REGION:eu-central-1}
+    # Local-testing-only escape hatch: a plain "host:port" pointing at a
+    # local PLAINTEXT Kafka broker (e.g. docker-compose's `kafka` service),
+    # bypassing the MSK GetBootstrapBrokers call and IAM/OAUTHBEARER auth
+    # entirely. Empty in every real environment — only ever set via
+    # docker-compose for exercising the warehouse pipeline locally.
+    local-bootstrap-servers: ${KAFKA_LOCAL_BOOTSTRAP_SERVERS:}
+  warehouse:
+    dynamodb-outbox:
+      batch-size: ${WAREHOUSE_DYNAMODB_OUTBOX_BATCH_SIZE:25}
+      poll-delay: ${WAREHOUSE_DYNAMODB_OUTBOX_POLL_DELAY:250ms}
+      lease: ${WAREHOUSE_DYNAMODB_OUTBOX_LEASE:60s}
+    outbox:
+      batch-size: ${WAREHOUSE_OUTBOX_BATCH_SIZE:50}
+      poll-delay: ${WAREHOUSE_OUTBOX_POLL_DELAY:1s}
+      lease: ${WAREHOUSE_OUTBOX_LEASE:60s}
+      send-timeout: ${WAREHOUSE_OUTBOX_SEND_TIMEOUT:10s}
+      cleanup-delay: ${WAREHOUSE_OUTBOX_CLEANUP_DELAY:1h}
+      sent-retention: ${WAREHOUSE_OUTBOX_SENT_RETENTION:7d}
+  rate-limit:
+    enabled: ${RATE_LIMIT_ENABLED:true}
+    # Steady-state throughput.
+    refill-tokens: ${RATE_LIMIT_REFILL_TOKENS:100}
+    refill-duration: ${RATE_LIMIT_REFILL_DURATION:1m}
+    # Burst capacity — how many requests a client can fire before throttling kicks in.
+    capacity: ${RATE_LIMIT_CAPACITY:100}

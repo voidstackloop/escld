@@ -1,0 +1,56 @@
+name: node-services
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "worker/**"
+      - "feed-worker/**"
+      - "analytics/**"
+      - "bq-sink/**"
+      - ".github/workflows/node-services.yml"
+  pull_request:
+    paths:
+      - "worker/**"
+      - "feed-worker/**"
+      - "analytics/**"
+      - "bq-sink/**"
+      - ".github/workflows/node-services.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [worker, feed-worker, analytics, bq-sink]
+    defaults:
+      run:
+        working-directory: ${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ${{ matrix.service }}/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      # Runs whichever tests exist today (`npm test` is a no-op stub for
+      # services that don't have a suite yet) — becomes a real gate as each
+      # service picks up coverage.
+      - name: Test
+        run: npm test --if-present
+
+      # Report-only for now: doesn't fail the build on every moderate CVE,
+      # matching this project's existing judgment-based (not blanket-force)
+      # approach to dependency vulnerabilities. Revisit once a baseline of
+      # accepted/fixed findings is established per service.
+      - name: Audit (report only)
+        run: npm audit --audit-level=high || true

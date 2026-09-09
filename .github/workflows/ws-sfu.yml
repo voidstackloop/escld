@@ -1,0 +1,33 @@
+name: ws-sfu
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ws-sfu/**"
+      - ".github/workflows/ws-sfu.yml"
+  pull_request:
+    paths:
+      - "ws-sfu/**"
+      - ".github/workflows/ws-sfu.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ws-sfu
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ws-sfu
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Test
+        run: cargo test --release

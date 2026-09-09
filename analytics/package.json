@@ -1,0 +1,35 @@
+{
+  "name": "escld-analytics",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws/aws-distro-opentelemetry-node-autoinstrumentation": "^0.12.0",
+    "aws-embedded-metrics": "^4.2.1",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "ioredis": "^5.4.1",
+    "kafkajs": "2.2.4",
+    "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.3",
+    "@types/node": "^22.20.1",
+    "@types/node-cron": "^3.0.11",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  },
+  "overrides": {
+    "qs": "^6.16.0"
+  }
+}

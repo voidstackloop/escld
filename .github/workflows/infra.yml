@@ -1,0 +1,42 @@
+name: infra
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra.yml"
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Test
+        run: npm test
+
+      # Build-correctness check only — confirms every stack synthesizes.
+      # Never runs `cdk deploy` from CI; deploys stay a manual, explicitly
+      # authorized action for this project.
+      - name: Synth
+        run: npx cdk synth --all

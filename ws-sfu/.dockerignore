@@ -1,0 +1,7 @@
+# Keeps this multi-GB build directory out of both the Docker build context
+# and CDK's DockerImageAsset staging copy (infra/lib/ws-sfu-stack.ts) — same
+# real, previously-hit issue rtmp/.dockerignore documents (a local `cargo
+# build`/`cargo test` run leaves target/ large enough, and potentially
+# actively being rewritten, to make every `cdk synth`/test run needlessly
+# slow or racy).
+target/

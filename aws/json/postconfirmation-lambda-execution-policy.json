@@ -1,0 +1,27 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CloudWatchLogs",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": "arn:aws:logs:AWS_REGION:AWS_ID:log-group:/aws/lambda/postConfirmation*"
+    },
+    {
+      "Sid": "VpcNetworkInterfaces",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateNetworkInterface",
+        "ec2:DescribeNetworkInterfaces",
+        "ec2:DeleteNetworkInterface",
+        "ec2:AssignPrivateIpAddresses",
+        "ec2:UnassignPrivateIpAddresses"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

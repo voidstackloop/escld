@@ -1,0 +1,514 @@
+services:
+  postgres:
+    image: 'postgres:17'
+    command: ['postgres', '-c', 'shared_buffers=128MB', '-c', 'max_connections=50']
+    environment:
+      - 'POSTGRES_USER=escld'
+      - 'POSTGRES_PASSWORD=escld'
+      - 'POSTGRES_DB=escld'
+    volumes:
+      - 'postgres-data:/var/lib/postgresql/data'
+    ports:
+      - '5432'
+    mem_limit: 512m
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U escld']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  postgres-exporter:
+    image: 'prometheuscommunity/postgres-exporter:v0.18.1'
+    profiles: ['monitoring']
+    environment:
+      - 'DATA_SOURCE_NAME=postgresql://escld:escld@postgres:5432/escld?sslmode=disable'
+    ports:
+      - '9187'
+    mem_limit: 64m
+    depends_on:
+      postgres:
+        condition: service_healthy
+  redis:
+    image: 'redis:latest'
+    command: ['redis-server', '--maxmemory', '128mb', '--maxmemory-policy', 'allkeys-lru']
+    volumes:
+      - 'redis-data:/data'
+    ports:
+      - '6379'
+    mem_limit: 192m
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  redis-exporter:
+    image: 'oliver006/redis_exporter:v1.79.0'
+    profiles: ['monitoring']
+    environment:
+      - 'REDIS_ADDR=redis://redis:6379'
+    ports:
+      - '9121'
+    mem_limit: 64m
+    depends_on:
+      redis:
+        condition: service_healthy
+  elasticsearch:
+    # Spring Boot 4 bundles elasticsearch-java client 9.x; matching the server
+    # major version avoids client/server protocol mismatches (7.x and 8.x both
+    # hit response-parsing errors against this client).
+    image: 'elasticsearch:9.4.3'
+    environment:
+      - 'ELASTIC_PASSWORD=secret'
+      - 'discovery.type=single-node'
+      - 'xpack.security.enabled=false'
+      - 'ES_JAVA_OPTS=-Xms512m -Xmx512m'
+    volumes:
+      - 'elasticsearch-data:/usr/share/elasticsearch/data'
+    mem_limit: 1200m
+    ports:
+      - '9200'
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -sf http://localhost:9200/_cluster/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+  elasticsearch-exporter:
+    image: 'quay.io/prometheuscommunity/elasticsearch-exporter:v1.9.0'
+    profiles: ['monitoring']
+    command: ['--es.uri=http://elasticsearch:9200']
+    ports:
+      - '9114'
+    mem_limit: 64m
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+  dynamodb-local:
+    image: 'amazon/dynamodb-local:3.3.0'
+    # -inMemory previously meant every restart (container recreate, Docker
+    # Desktop restart, host reboot) silently wiped the whole social graph and
+    # feed — happened for real during local dev. -dbPath + a named volume
+    # persists it to disk like every other store here.
+    command: ['-Xmx256m', '-jar', 'DynamoDBLocal.jar', '-sharedDb', '-dbPath', '/home/dynamodblocal/data']
+    # Named volumes are created root-owned unless the image declares a VOLUME
+    # at that exact path (this one doesn't) — this image's default user can't
+    # write there otherwise.
+    user: root
+    volumes:
+      - 'dynamodb-data:/home/dynamodblocal/data'
+    ports:
+      - '8000:8000'
+    mem_limit: 384m
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -sf http://localhost:8000 || exit 0']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  sqs-local:
+    image: 'softwaremill/elasticmq-native:1.7.1'
+    volumes:
+      - './config/elasticmq.conf:/opt/elasticmq.conf:ro'
+    ports:
+      - '9324:9324'
+    mem_limit: 256m
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -sf http://localhost:9324 || exit 0']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  backend:
+    build: ./backend
+    ports:
+      - '8080:8080'
+      - '9090:9090'
+    mem_limit: 1g
+    environment:
+      # No -Xmx set anywhere else, so the JVM defaults to ~25% of whatever
+      # memory it sees — normally the host's full RAM, since this container
+      # has no other cgroup limit telling it otherwise. That alone was a
+      # multi-GB phantom reservation for a small dev app. Capped explicitly.
+      - 'JAVA_TOOL_OPTIONS=-Xmx2048m -XX:MaxMetaspaceSize=192m'
+      - 'SPRING_DOCKER_COMPOSE_ENABLED=false'
+      - 'SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/escld'
+      - 'SPRING_DATASOURCE_USERNAME=escld'
+      - 'SPRING_DATASOURCE_PASSWORD=escld'
+      - 'SPRING_DATA_REDIS_HOST=redis'
+      - 'SPRING_DATA_REDIS_PORT=6379'
+      - 'SPRING_ELASTICSEARCH_URIS=http://elasticsearch:9200'
+      - 'DYNAMODB_ENDPOINT=http://dynamodb-local:8000'
+      - 'SQS_ENDPOINT=http://sqs-local:9324'
+      - 'SQS_TRANSCODE_QUEUE_URL=http://sqs-local:9324/000000000000/transcode-jobs'
+      - 'SQS_POST_EVENTS_QUEUE_URL=http://sqs-local:9324/000000000000/post-events'
+      - 'DYNAMODB_FEED_TABLE=feed'
+      - 'DYNAMODB_MODERATION_TABLE=moderation'
+      - 'DYNAMODB_LIKES_TABLE=likes'
+      - 'DYNAMODB_DOMAIN_OUTBOX_TABLE=domain_outbox'
+      - 'AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-local}'
+      - 'AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-local}'
+      - 'AWS_REGION=${AWS_REGION:-eu-central-1}'
+      - 'MEDIA_BUCKET_REGION=${MEDIA_BUCKET_REGION:-eu-central-1}'
+      - 'MEDIA_BUCKET_NAME=${MEDIA_BUCKET_NAME:-}'
+      - 'MEDIA_CLOUDFRONT_DOMAIN=${MEDIA_CLOUDFRONT_DOMAIN:-}'
+      - 'ANALYTICS_EVENTS_CHANNEL=analytics-events'
+      # Both empty/false by default — the warehouse Kafka producer bean stays
+      # entirely skipped (see KafkaConfig's @ConditionalOnProperty), exactly
+      # like every other environment with no MSK cluster. Only set when
+      # deliberately testing the local Kafka smoke test (see
+      # docs/LOCAL_DEVELOPMENT.md's "warehouse" profile), e.g.:
+      #   KAFKA_ENABLED=true KAFKA_LOCAL_BOOTSTRAP_SERVERS=kafka:9092 \
+      #     docker compose --profile warehouse up -d
+      - 'KAFKA_ENABLED=${KAFKA_ENABLED:-false}'
+      - 'KAFKA_LOCAL_BOOTSTRAP_SERVERS=${KAFKA_LOCAL_BOOTSTRAP_SERVERS:-}'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      dynamodb-local:
+        condition: service_healthy
+      sqs-local:
+        condition: service_healthy
+    healthcheck:
+      # Actuator now lives on the separate management port (9090), not 8080.
+      # No curl/wget in the eclipse-temurin JRE base image — bash's /dev/tcp is the only HTTP client available.
+      test:
+        - CMD
+        - bash
+        - -c
+        - "exec 3<>/dev/tcp/127.0.0.1/9090 && printf 'GET /actuator/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q '\"status\":\"UP\"' <&3"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+  # Monitoring stack (prometheus/grafana + the *-exporter services above) is
+  # opt-in via a Compose profile — `docker compose up -d` no longer starts it
+  # by default. Bring it up only when actually working on dashboards/metrics:
+  #   docker compose --profile monitoring up -d
+  prometheus:
+    image: 'prom/prometheus:v3.13.1'
+    profiles: ['monitoring']
+    volumes:
+      - './config/prometheus.yml:/etc/prometheus/prometheus.yml:ro'
+      - './config/prometheus-rules.yml:/etc/prometheus/prometheus-rules.yml:ro'
+      - 'prometheus-data:/prometheus'
+    ports:
+      - '9091:9090'
+    mem_limit: 384m
+    depends_on:
+      backend:
+        condition: service_healthy
+  grafana:
+    image: 'grafana/grafana:11.5.2'
+    profiles: ['monitoring']
+    environment:
+      - 'GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}'
+      - 'GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}'
+      - 'GF_USERS_ALLOW_SIGN_UP=false'
+    volumes:
+      - './config/grafana/provisioning:/etc/grafana/provisioning:ro'
+      - './config/grafana/dashboards:/etc/grafana/dashboards:ro'
+      - 'grafana-data:/var/lib/grafana'
+    ports:
+      - '3000:3000'
+    mem_limit: 256m
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -sf http://localhost:3000/api/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    depends_on:
+      prometheus:
+        condition: service_started
+  worker:
+    build: ./worker
+    # ffmpeg transcoding is the one thing here that can spike with input size —
+    # left roomier than the other Node services for that reason.
+    mem_limit: 512m
+    environment:
+      - 'SQS_ENDPOINT=http://sqs-local:9324'
+      - 'SQS_TRANSCODE_QUEUE_URL=http://sqs-local:9324/000000000000/transcode-jobs'
+      - 'SQS_MAX_RECEIVE_COUNT=3'
+      - 'WORKER_CONCURRENCY=2'
+      - 'HEALTH_PORT=8080'
+      - 'DB_HOST=postgres'
+      - 'DB_PORT=5432'
+      - 'DB_NAME=escld'
+      - 'DB_USER=escld'
+      - 'DB_PASSWORD=escld'
+      - 'DB_SSL=false'
+      - 'AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-local}'
+      - 'AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-local}'
+      - 'AWS_REGION=${AWS_REGION:-eu-central-1}'
+      - 'MEDIA_BUCKET_NAME=${MEDIA_BUCKET_NAME:-}'
+      - 'MEDIA_CLOUDFRONT_DOMAIN=${MEDIA_CLOUDFRONT_DOMAIN:-}'
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://localhost:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      sqs-local:
+        condition: service_healthy
+  feed-worker:
+    build: ./feed-worker
+    # ~90MB ONNX embedding model loads lazily on first post event (see
+    # src/index.ts) rather than at startup, so this stays small while idle.
+    mem_limit: 512m
+    environment:
+      - 'SQS_ENDPOINT=http://sqs-local:9324'
+      - 'SQS_POST_EVENTS_QUEUE_URL=http://sqs-local:9324/000000000000/post-events'
+      - 'SQS_MAX_RECEIVE_COUNT=3'
+      - 'WORKER_CONCURRENCY=2'
+      - 'HEALTH_PORT=8080'
+      - 'DYNAMODB_ENDPOINT=http://dynamodb-local:8000'
+      - 'DYNAMODB_FOLLOWS_TABLE=follows'
+      - 'DYNAMODB_FEED_TABLE=feed'
+      - 'ELASTICSEARCH_URL=http://elasticsearch:9200'
+      - 'POSTS_SEARCH_INDEX=posts_search'
+      - 'AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-local}'
+      - 'AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-local}'
+      - 'AWS_REGION=${AWS_REGION:-eu-central-1}'
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://localhost:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      dynamodb-local:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      sqs-local:
+        condition: service_healthy
+  analytics:
+    build: ./analytics
+    ports:
+      - '4100:4100'
+    mem_limit: 256m
+    environment:
+      - 'PORT=4100'
+      - 'CORS_ALLOWED_ORIGINS=http://localhost:5173'
+      - 'REDIS_HOST=redis'
+      - 'REDIS_PORT=6379'
+      - 'ANALYTICS_EVENTS_CHANNEL=analytics-events'
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://localhost:4100/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      redis:
+        condition: service_healthy
+  ws-sfu:
+    build: ./ws-sfu
+    ports:
+      - '4000:4000'
+      - '40000-40019:40000-40019/udp'
+      - '40000-40019:40000-40019/tcp'
+    mem_limit: 512m
+    environment:
+      - 'PORT=4000'
+      # Defaults to one mediasoup worker per host CPU core, which is real
+      # parallelism for production call load but way more processes than a
+      # couple of local-dev browser tabs will ever need — pinned low here so
+      # it doesn't spawn 10+ mediasoup worker processes on a beefy dev
+      # machine. Bump this (and the published port range above) if actually
+      # load-testing concurrent calls.
+      - 'MEDIASOUP_WORKER_COUNT=2'
+      - 'CORS_ALLOWED_ORIGINS=http://localhost:5173'
+      - 'AWS_REGION=${AWS_REGION:-eu-central-1}'
+      - 'AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-local}'
+      - 'AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-local}'
+      - 'DYNAMODB_ENDPOINT=http://dynamodb-local:8000'
+      - 'DYNAMODB_CONVERSATIONS_TABLE=conversations'
+      - 'COGNITO_ISSUER_URI=${COGNITO_ISSUER_URI:-https://cognito-idp.eu-central-1.amazonaws.com/eu-central-1_ESOikZUZv}'
+      - 'COGNITO_APP_CLIENT_ID=${COGNITO_APP_CLIENT_ID:-38h4lsvt0ujkjv2qoc9dobj8hv}'
+      - 'DB_HOST=postgres'
+      - 'DB_PORT=5432'
+      - 'DB_NAME=escld'
+      - 'DB_USER=escld'
+      - 'DB_PASSWORD=escld'
+      - 'DB_SSL=false'
+      # 127.0.0.1 so the browser's ICE candidates point back at localhost,
+      # matching this local-dev setup where the browser and Docker host are
+      # the same machine (see ws-sfu/src/config.rs for the production caveat).
+      - 'MEDIASOUP_LISTEN_IP=0.0.0.0'
+      - 'MEDIASOUP_ANNOUNCED_IP=127.0.0.1'
+      - 'MEDIASOUP_RTC_MIN_PORT=40000'
+      - 'MEDIASOUP_RTC_MAX_PORT=40019'
+      # RECORDINGS_BUCKET intentionally unset here — there's no local S3
+      # emulator in this compose file, so call recording (see
+      # src/sfu/recording.rs) is a no-op locally, failing cleanly with
+      # "no recordings bucket configured" if triggered. Only set in
+      # production via WsSfuStack (infra/lib/ws-sfu-stack.ts).
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:4000/health']
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      dynamodb-local:
+        condition: service_healthy
+  rtmp:
+    build: ./rtmp
+    ports:
+      - '1935:1935'
+      - '4001:4001'
+    mem_limit: 512m
+    environment:
+      - 'PORT=1935'
+      # Without this, tracing's default EnvFilter emits nothing at all (not
+      # even connection-accepted/handshake-failed lines) — found while
+      # locally testing a real RTMP publish, where the container's logs
+      # were completely empty despite real traffic hitting it.
+      - 'RUST_LOG=info'
+      - 'DB_HOST=postgres'
+      - 'DB_PORT=5432'
+      - 'DB_NAME=escld'
+      - 'DB_USER=escld'
+      - 'DB_PASSWORD=escld'
+      - 'DB_SSL=false'
+      - 'HLS_DIR=/tmp/rtmp-hls'
+      - 'AWS_REGION=${AWS_REGION:-eu-central-1}'
+      - 'AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-local}'
+      - 'AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-local}'
+      # LIVE_BUCKET_NAME intentionally unset — no local S3 emulator in this
+      # compose file, so S3 HLS upload (s3_sync.rs) is a no-op locally,
+      # exactly like ws-sfu's own RECORDINGS_BUCKET above; a stream stays
+      # reachable only via this service's own /hls/* route (port 4001).
+      - 'REDIS_HOST=redis'
+      - 'REDIS_PORT=6379'
+      # Empty by default, same "only set for the local Kafka smoke test"
+      # shape as backend's KAFKA_LOCAL_BOOTSTRAP_SERVERS above.
+      - 'KAFKA_LOCAL_BOOTSTRAP_SERVERS=${KAFKA_LOCAL_BOOTSTRAP_SERVERS:-}'
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:4001/health']
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+  # Local-testing-only: a plain single-broker Kafka (KRaft mode, no
+  # ZooKeeper) plus bq-sink, gated behind this profile so a plain
+  # `docker compose up -d` stays exactly as light as it is today. Brings up
+  # the real Kafka wire protocol end-to-end (backend/rtmp producers -> this
+  # broker -> bq-sink consumer) without needing real MSK/AWS IAM — see
+  # KAFKA_LOCAL_BOOTSTRAP_SERVERS above and bq-sink's own LoggingWarehouse
+  # fallback (no GCP project needed locally either):
+  #   KAFKA_ENABLED=true KAFKA_LOCAL_BOOTSTRAP_SERVERS=kafka:9092 \
+  #     docker compose --profile warehouse up -d
+  kafka:
+    image: 'apache/kafka:3.9.0'
+    profiles: ['warehouse']
+    ports:
+      - '9092:9092'
+    mem_limit: 512m
+    environment:
+      - 'KAFKA_NODE_ID=1'
+      - 'KAFKA_PROCESS_ROLES=broker,controller'
+      - 'KAFKA_LISTENERS=PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093'
+      # Kafka 3.9 (KIP-919) validates the controller listener's advertised
+      # address too, not just client-facing ones — omitting it here left the
+      # effective advertised listener list falling back to the 0.0.0.0 bind
+      # address from KAFKA_LISTENERS, which KafkaConfig.validateValues
+      # rejects outright ("nonroutable meta-address 0.0.0.0").
+      - 'KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092,CONTROLLER://kafka:9093'
+      - 'KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER'
+      - 'KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT'
+      - 'KAFKA_CONTROLLER_QUORUM_VOTERS=1@kafka:9093'
+      # A single-broker local cluster can't satisfy the real topics'
+      # replication-factor-3 (see KafkaConfig.java/kafka.ts's shared
+      # PARTITION_COUNT/REPLICATION_FACTOR constants) — those topics are
+      # pre-created here with replication factor 1 instead of relying on
+      # each service's own idempotent create-topics call, which would just
+      # fail with InvalidReplicationFactorException against this broker.
+      - 'KAFKA_AUTO_CREATE_TOPICS_ENABLE=false'
+      # Kafka's own internal __consumer_offsets/__transaction_state topics
+      # default to replication-factor 3 regardless of KAFKA_AUTO_CREATE_TOPICS
+      # above — on a single-broker cluster that leaves them permanently
+      # under-replicated/uncreatable, which surfaces to any consumer as "The
+      # group coordinator is not available" the moment it tries to join a
+      # group, with no indication the real cause is these internal topics.
+      - 'KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1'
+      - 'KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1'
+      - 'KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1'
+    healthcheck:
+      test: ['CMD-SHELL', '/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1']
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 20s
+  bq-sink:
+    build: ./bq-sink
+    profiles: ['warehouse']
+    ports:
+      - '4200:4200'
+    mem_limit: 256m
+    environment:
+      - 'HEALTH_PORT=4200'
+      - 'AWS_REGION=${AWS_REGION:-eu-central-1}'
+      - 'KAFKA_LOCAL_BOOTSTRAP_SERVERS=kafka:9092'
+      - 'KAFKA_TOPICS=post.created,post.liked,post.unliked,post.commented,post.comment_deleted,post.hidden,post.unhidden,user.followed,user.unfollowed,live.started,live.ended,post.impression,post.dwell,feed.served,media.progress'
+      - 'KAFKA_GROUP_ID=bq-sink'
+      # GCP_WORKLOAD_IDENTITY_PROVIDER/BIGQUERY_PROJECT_ID intentionally
+      # unset — no real GCP project for local testing, so index.ts swaps in
+      # a LoggingWarehouse that logs what it would have inserted instead of
+      # calling BigQuery (no service-account key/secret involved either way
+      # — bq-sink authenticates via Workload Identity Federation, see
+      # gcp-auth.ts). Proves the real Kafka hop (producer -> broker ->
+      # consumer -> envelope parsing) without any cloud-specific last-mile
+      # write.
+      - 'BIGQUERY_DATASET=escld_events_raw'
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://localhost:4200/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      kafka:
+        condition: service_healthy
+  frontend:
+    # Local-dev convenience only (no Dockerfile/production build here) — runs
+    # the Vite dev server against the already-installed node_modules via a
+    # bind mount, so it's reachable through Docker's published ports instead
+    # of relying on WSL's own localhost port-forwarding for a bare process.
+    image: 'node:22-bookworm-slim'
+    working_dir: /app
+    volumes:
+      - './frontend:/app'
+    command: ['npm', 'run', 'dev', '--', '--host', '0.0.0.0', '--port', '5173']
+    environment:
+      - 'VITE_API_URL=http://localhost:8080'
+      - 'VITE_WS_SFU_URL=http://localhost:4000'
+      - 'VITE_ANALYTICS_URL=http://localhost:4100'
+    ports:
+      - '5173:5173'
+    mem_limit: 768m
+    depends_on:
+      backend:
+        condition: service_healthy
+      ws-sfu:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  redis-data:
+  elasticsearch-data:
+  dynamodb-data:
+  prometheus-data:
+  grafana-data:

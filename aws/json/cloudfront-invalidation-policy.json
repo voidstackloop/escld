@@ -1,0 +1,15 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "InvalidateMediaDistribution",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:CreateInvalidation",
+        "cloudfront:GetInvalidation",
+        "cloudfront:ListInvalidations"
+      ],
+      "Resource": "arn:aws:cloudfront::AWS_ID:distribution/CLOUDFRONT_ID"
+    }
+  ]
+}

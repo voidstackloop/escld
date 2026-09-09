@@ -1,0 +1,6 @@
+# Keeps this multi-GB build directory out of both the Docker build context
+# and CDK's DockerImageAsset staging copy (infra/lib/rtmp-service-stack.ts)
+# — without this, every `cdk synth`/test run copies whatever's currently in
+# target/ (which a concurrent local `cargo build` can be actively rewriting,
+# a real race that intermittently fails asset staging with an ENOENT).
+target/

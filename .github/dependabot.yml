@@ -1,0 +1,70 @@
+version: 2
+updates:
+  - package-ecosystem: maven
+    directory: /backend
+    schedule:
+      interval: weekly
+    groups:
+      backend-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /worker
+    schedule:
+      interval: weekly
+    groups:
+      worker-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /feed-worker
+    schedule:
+      interval: weekly
+    groups:
+      feed-worker-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /analytics
+    schedule:
+      interval: weekly
+    groups:
+      analytics-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /bq-sink
+    schedule:
+      interval: weekly
+    groups:
+      bq-sink-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    groups:
+      frontend-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /infra
+    schedule:
+      interval: weekly
+    groups:
+      infra-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: cargo
+    directory: /ws-sfu
+    schedule:
+      interval: weekly
+    groups:
+      ws-sfu-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

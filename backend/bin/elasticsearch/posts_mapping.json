@@ -1,0 +1,16 @@
+{
+  "mappings": {
+    "properties": {
+      "userId": { "type": "keyword" },
+      "text": { "type": "text" },
+      "tags": { "type": "keyword" },
+      "createdAt": { "type": "date" },
+      "embedding": {
+        "type": "dense_vector",
+        "dims": 384,
+        "index": true,
+        "similarity": "cosine"
+      }
+    }
+  }
+}

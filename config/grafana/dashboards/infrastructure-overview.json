@@ -1,0 +1,133 @@
+{
+  "title": "escld Infrastructure Overview",
+  "uid": "escld-infra-overview",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Postgres — active connections",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 0 },
+      "targets": [
+        { "expr": "pg_stat_database_numbackends{datname=\"escld\"}", "legendFormat": "connections", "refId": "A" }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Postgres — cache hit ratio",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(pg_stat_database_blks_hit{datname=\"escld\"}[5m])) / (sum(rate(pg_stat_database_blks_hit{datname=\"escld\"}[5m])) + sum(rate(pg_stat_database_blks_read{datname=\"escld\"}[5m])))",
+          "legendFormat": "hit ratio",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1, "min": 0 }, "overrides": [] }
+    },
+    {
+      "id": 3,
+      "title": "Postgres — transactions/sec",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 0 },
+      "targets": [
+        { "expr": "rate(pg_stat_database_xact_commit{datname=\"escld\"}[5m])", "legendFormat": "commits/s", "refId": "A" },
+        { "expr": "rate(pg_stat_database_xact_rollback{datname=\"escld\"}[5m])", "legendFormat": "rollbacks/s", "refId": "B" }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "HikariCP — connection pool",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 7 },
+      "targets": [
+        { "expr": "hikaricp_connections_active{application=\"backend\"}", "legendFormat": "active", "refId": "A" },
+        { "expr": "hikaricp_connections_idle{application=\"backend\"}", "legendFormat": "idle", "refId": "B" },
+        { "expr": "hikaricp_connections_pending{application=\"backend\"}", "legendFormat": "pending", "refId": "C" }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Backend user-cache hit rate (Redis-backed)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 7 },
+      "targets": [
+        {
+          "expr": "sum(rate(cache_gets_total{application=\"backend\",result=\"hit\"}[5m])) by (cache) / sum(rate(cache_gets_total{application=\"backend\"}[5m])) by (cache)",
+          "legendFormat": "{{cache}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1, "min": 0 }, "overrides": [] }
+    },
+    {
+      "id": 6,
+      "title": "Redis — ops/sec",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 7 },
+      "targets": [
+        { "expr": "rate(redis_commands_processed_total[5m])", "legendFormat": "commands/s", "refId": "A" }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Redis — memory used",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 14 },
+      "targets": [
+        { "expr": "redis_memory_used_bytes", "legendFormat": "used", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] }
+    },
+    {
+      "id": 8,
+      "title": "Redis — connected clients",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 14 },
+      "targets": [
+        { "expr": "redis_connected_clients", "legendFormat": "clients", "refId": "A" }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Redis — up",
+      "type": "stat",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 14 },
+      "targets": [{ "expr": "redis_up", "refId": "A" }]
+    },
+    {
+      "id": 10,
+      "title": "Elasticsearch — cluster health",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 21 },
+      "targets": [
+        { "expr": "elasticsearch_cluster_health_status{color=\"green\"}", "legendFormat": "green", "refId": "A" },
+        { "expr": "elasticsearch_cluster_health_status{color=\"yellow\"}", "legendFormat": "yellow", "refId": "B" },
+        { "expr": "elasticsearch_cluster_health_status{color=\"red\"}", "legendFormat": "red", "refId": "C" }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Elasticsearch — JVM heap used",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 21 },
+      "targets": [
+        { "expr": "elasticsearch_jvm_memory_used_bytes{area=\"heap\"}", "legendFormat": "heap used", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] }
+    },
+    {
+      "id": 12,
+      "title": "Elasticsearch — document count",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 21 },
+      "targets": [
+        { "expr": "elasticsearch_indices_docs", "legendFormat": "docs", "refId": "A" }
+      ]
+    }
+  ]
+}

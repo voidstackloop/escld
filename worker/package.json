@@ -1,0 +1,31 @@
+{
+  "name": "escld-transcode-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1090.0",
+    "@aws-sdk/client-sqs": "^3.1090.0",
+    "@aws/aws-distro-opentelemetry-node-autoinstrumentation": "^0.12.0",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/core": "^2.8.0",
+    "aws-embedded-metrics": "^4.2.1",
+    "pg": "^8.22.0"
+  },
+  "devDependencies": {
+    "@opentelemetry/context-async-hooks": "^2.8.0",
+    "@types/node": "^22.20.1",
+    "@types/pg": "^8.20.0",
+    "typescript": "^7.0.2",
+    "vitest": "^3.0.5"
+  }
+}

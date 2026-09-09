@@ -1,0 +1,12 @@
+{
+  "name": "escld-pre-signup",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "index.mjs",
+  "description": "Cognito PreSignUp trigger: rejects a signup if preferred_username is already taken in Postgres.",
+  "dependencies": {
+    "pg": "^8.22.0",
+    "@aws-sdk/client-secrets-manager": "^3.1090.0"
+  }
+}

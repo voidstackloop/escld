@@ -1,0 +1,13 @@
+{
+  "mappings": {
+    "properties": {
+      "username": { "type": "text" },
+      "displayName": { "type": "text" },
+      "bio": { "type": "text" },
+      "avatarUrl": { "type": "keyword", "index": false },
+      "verified": { "type": "boolean" },
+      "privateAccount": { "type": "boolean" },
+      "followersCount": { "type": "integer" }
+    }
+  }
+}

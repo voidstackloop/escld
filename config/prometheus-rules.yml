@@ -1,0 +1,84 @@
+groups:
+  - name: escld-availability
+    rules:
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: '{{ $labels.job }} is down'
+          description: '{{ $labels.job }} has been unreachable by Prometheus for over 1 minute.'
+
+      - alert: PostgresDown
+        expr: pg_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Postgres is down'
+          description: 'postgres-exporter reports the database as unreachable for over 1 minute.'
+
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Redis is down'
+          description: 'redis-exporter reports Redis as unreachable for over 1 minute — this also breaks rate limiting (fail-open) and analytics pub/sub.'
+
+  - name: escld-backend
+    rules:
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m]))
+            /
+          sum(rate(http_server_requests_seconds_count[5m]))
+          > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Backend 5xx rate above 5%'
+          description: 'More than 5% of backend requests have returned a 5xx status over the last 5 minutes.'
+
+      - alert: HighP99Latency
+        expr: |
+          histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket[5m])) by (le)) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Backend p99 latency above 2s'
+          description: 'The 99th-percentile response time across all backend endpoints has exceeded 2 seconds for 5 minutes.'
+
+      - alert: RateLimitSaturation
+        expr: |
+          sum(rate(http_server_requests_seconds_count{status="429"}[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Sustained rate-limit throttling'
+          description: 'More than 5 requests/sec are being rejected with 429 over a 5 minute window — either abusive traffic or the configured capacity (app.rate-limit.*) is too low for real usage.'
+
+      - alert: WsSfuAuthFailureSpike
+        expr: |
+          rate(ws_sfu_auth_failures_total[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'ws-sfu rejecting connections at an elevated rate'
+          description: 'More than 1/sec Socket.IO connect attempts have failed authentication over 5 minutes — could be a broken client (e.g. Cognito key rotation not yet picked up) or credential-stuffing against ws-sfu.'
+
+      - alert: HighJvmHeapUsage
+        expr: |
+          sum(jvm_memory_used_bytes{area="heap"}) / sum(jvm_memory_max_bytes{area="heap"}) > 0.9
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Backend JVM heap usage above 90%'
+          description: 'Heap usage has stayed above 90% of the configured max for 10 minutes — risk of GC pauses or OOM under JAVA_TOOL_OPTIONS -Xmx2048m (see docker-compose.yaml).'

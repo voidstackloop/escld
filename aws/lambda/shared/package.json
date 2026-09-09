@@ -1,0 +1,10 @@
+{
+  "name": "escld-lambda-shared",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared helpers for escld's Cognito trigger Lambdas — imported by relative path from postConfirmation/ and preSignUp/, not published or deployed on its own.",
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.1090.0"
+  }
+}

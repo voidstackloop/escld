@@ -1,0 +1,77 @@
+[package]
+name = "ws-sfu"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+axum = "0.8"
+tower-http = { version = "0.7", features = ["cors"] }
+socketioxide = { version = "0.18", features = ["tracing", "state", "extensions"] }
+
+# A real, previously-hit bug found via live end-to-end testing (a genuine
+# RS256 token against a real JWKS endpoint, not a unit test): jsonwebtoken
+# 11's *own* internal crypto-backend selection (`jsonwebtoken::crypto::
+# CryptoProvider` — a name that coincidentally collides with, but is
+# entirely unrelated to, `rustls::crypto::CryptoProvider`) is chosen via its
+# own Cargo features `aws_lc_rs`/`rust_crypto`, and jsonwebtoken's default
+# features enable *neither* — so any RS256 `decode()` call (this service's
+# only real use, verifying Cognito access tokens) unconditionally PANICS,
+# regardless of anything else in the dependency graph. `aws_lc_rs` chosen to
+# match the backend every AWS SDK client in this service already uses.
+jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+
+aws-config = "1"
+aws-sdk-dynamodb = "1"
+aws-sdk-s3 = "1"
+
+# Sends SIGINT to the ffmpeg recording process so it finalizes its output
+# container on stop, instead of leaving a truncated file behind (SIGKILL would).
+nix = { version = "0.29", features = ["signal"] }
+
+sqlx = { version = "0.9", default-features = false, features = [
+    "runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono", "macros",
+] }
+
+governor = "0.10"
+
+mediasoup = "0.27"
+
+prometheus = "0.14"
+
+# X-Ray tracing (Phase 2 of the telemetry rollout) — no ADOT distro exists
+# for Rust (unlike Java/Node elsewhere in this app), so this is hand-rolled:
+# tracing-opentelemetry bridges the existing `tracing` spans/events into
+# OpenTelemetry, opentelemetry-otlp exports them over OTLP/HTTP to a sibling
+# ADOT Collector container (see ws-sfu-stack.ts). All 4 crates pinned to a
+# verified-compatible set (tracing-opentelemetry 0.33 requires opentelemetry
+# ^0.32, confirmed against docs.rs before adding) — the wider OpenTelemetry
+# Rust ecosystem does not preserve semver compatibility across minor
+# versions the way most Rust crates do, so these four move together.
+opentelemetry = "0.32"
+opentelemetry_sdk = "0.32"
+opentelemetry-otlp = { version = "0.32", default-features = false, features = ["trace", "http-proto", "reqwest-client"] }
+tracing-opentelemetry = "0.33"
+
+# Consumes live.started/live.ended from the same MSK Serverless cluster the
+# Java backend and rtmp/ already publish to (see kafka/mod.rs) — same
+# versions/pattern as rtmp/Cargo.toml's identical producer-side use, so the
+# MSK IAM/OAUTHBEARER wiring (aws-msk-iam-sasl-signer bridged into
+# rdkafka's OAuth refresh callback) is proven, not new territory twice over.
+rdkafka = { version = "0.39.0", features = ["tokio", "ssl", "cmake-build"] }
+aws-msk-iam-sasl-signer = "1.0.1"
+aws-sdk-kafka = "1.124.0"
+
+# Independent per-socket sampling for the weighted follower/discovery live
+# push (see kafka/mod.rs::deliver_live_event) — not previously a dependency
+# of this service.
+rand = "0.10"
