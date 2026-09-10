@@ -16,7 +16,7 @@
     "@aws/aws-distro-opentelemetry-node-autoinstrumentation": "^0.12.0",
     "aws-embedded-metrics": "^4.2.1",
     "cors": "^2.8.5",
-    "express": "^4.21.2",
+    "express": "^5.2.1",
     "ioredis": "^5.4.1",
     "kafkajs": "2.2.4",
     "node-cron": "^3.0.3"
