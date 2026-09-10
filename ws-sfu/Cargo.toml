@@ -36,7 +36,7 @@ aws-sdk-s3 = "1"
 
 # Sends SIGINT to the ffmpeg recording process so it finalizes its output
 # container on stop, instead of leaving a truncated file behind (SIGKILL would).
-nix = { version = "0.29", features = ["signal"] }
+nix = { version = "0.31", features = ["signal"] }
 
 sqlx = { version = "0.9", default-features = false, features = [
     "runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono", "macros",
