@@ -41,8 +41,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY --from=build /app/target/release/ws-sfu ./ws-sfu
 EXPOSE 4000
-EXPOSE 40000-40019/udp
-EXPOSE 40000-40019/tcp
+EXPOSE 40000-40999/udp
+EXPOSE 40000-40999/tcp
 HEALTHCHECK --interval=15s --timeout=5s --start-period=15s --retries=3 \
     CMD wget -qO- http://localhost:4000/health || exit 1
 CMD ["./ws-sfu"]

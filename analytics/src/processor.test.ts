@@ -45,6 +45,7 @@ function makeDeps() {
       zincrby: vi.fn(),
       sadd: vi.fn(),
       expire: vi.fn(),
+      del: vi.fn(),
       exec: vi.fn(async () => []),
     })),
     zcard: vi.fn(async () => 0),
@@ -151,7 +152,6 @@ describe("AnalyticsProcessor", () => {
     const { redis, trending } = makeDeps();
     const sadd = vi.fn(async () => 1);
     (redis as unknown as Record<string, unknown>).sadd = sadd;
-    (redis as unknown as Record<string, unknown>).del = vi.fn(async () => 1);
     const processor = new AnalyticsProcessor(
       {} as never,
       redis as never,

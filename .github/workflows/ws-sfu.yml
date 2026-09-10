@@ -21,10 +21,25 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ws-sfu
+
+      # Matches ws-sfu/Dockerfile's builder-stage deps exactly: rdkafka's
+      # build script compiles librdkafka from source via cmake (needed for
+      # the live-feed Kafka consumer), and mediasoup-sys's build script
+      # generates code from flatbuffers schemas and pipes it through rustfmt
+      # (added above) - ubuntu-latest ships neither cmake nor these dev
+      # headers by default, so a bare `cargo build` fails here exactly like
+      # it does against a bare rust:bookworm image with nothing installed.
+      - name: Install system build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake libssl-dev zlib1g-dev libcurl4-openssl-dev
 
       - name: Build
         run: cargo build --release

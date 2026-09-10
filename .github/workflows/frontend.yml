@@ -26,8 +26,20 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      # `npm ci` (not `npm install`) everywhere else in this repo, but not
+      # here: @aws-amplify/backend-cli's dependency tree (needed for real
+      # Cognito auth-trigger Lambda deploys, see amplify/auth/resource.ts —
+      # not dead weight) pulls in AWS SDK v3 packages whose optional
+      # dependencies (fast-xml-parser, and others) resolve non-
+      # deterministically across otherwise-identical `npm install` runs —
+      # confirmed directly: two fresh installs from a cleared cache produced
+      # two completely different sets of packages `npm ci` then rejected as
+      # missing from the lock file. Same accepted trade-off bq-sink's
+      # Dockerfile already makes for the identical reason (see its own
+      # comment) — reproducible-from-lockfile installs aren't achievable for
+      # this dependency tree with the current npm resolver.
       - name: Install
-        run: npm ci
+        run: npm install
 
       - name: Lint
         run: npm run lint
