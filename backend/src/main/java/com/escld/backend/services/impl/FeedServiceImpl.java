@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service;
 
 import com.escld.backend.cache.RedisBatchCache;
 import com.escld.backend.analytics.ObservationTokenService;
+import com.escld.backend.experiment.ExperimentAssignment;
 import com.escld.backend.config.CacheConfig;
 import com.escld.backend.dto.FeedPageResponse;
 import com.escld.backend.dto.PostResponse;
@@ -153,6 +154,16 @@ public class FeedServiceImpl implements FeedService {
      * post would score from a stranger — deliberately capped below "can
      * override everything else" territory. */
     private static final double AUTHOR_AFFINITY_BOOST_WEIGHT = 0.5;
+
+    /** First real A/B test wired through the experimentId/experimentVariant
+     * fields WarehouseEventPublisher already carried but never populated —
+     * see ExperimentAssignment. Deterministic per-viewer, no assignment
+     * table: "treatment" gets the real AUTHOR_AFFINITY_BOOST_WEIGHT above,
+     * "control" gets 0 (the boost fully off, not just weakened), so
+     * feed.served warehouse rows let this be measured against real
+     * engagement instead of taken on faith. */
+    private static final String EXPERIMENT_AUTHOR_AFFINITY_BOOST_ID = "author_affinity_boost_v1";
+    private static final List<String> EXPERIMENT_VARIANTS = List.of("control", "treatment");
 
     /** How many days a follow stays "fresh" enough to meaningfully boost that
      * author's posts — same decay shape as RECENCY_HALF_LIFE_HOURS, just on a
@@ -303,11 +314,17 @@ public class FeedServiceImpl implements FeedService {
         if (normalized != null && !normalized.equals("following") && !normalized.equals("for_you")) {
             throw new IllegalArgumentException("Invalid mode: " + mode);
         }
+        // Computed once per request regardless of which branch below actually
+        // ranks anything, so every feed.served row (including a snapshot
+        // replay, which doesn't re-run rankFeed) carries consistent
+        // attribution for the same viewer.
+        String experimentVariant = ExperimentAssignment.assign(userId, EXPERIMENT_AUTHOR_AFFINITY_BOOST_ID, EXPERIMENT_VARIANTS);
         if (feedSnapshotStore != null && feedSnapshotStore.isSnapshotCursor(cursor)) {
             FeedSnapshotStore.Slice slice = feedSnapshotStore.resume(userId, cursor, limit, normalized);
             if (slice.postIds().isEmpty()) {
                 if (slice.sourceCursor() == null) {
-                    return renderPage(userId, List.of(), Map.of(), Set.of(), Map.of(), null, true, true);
+                    return renderPage(userId, List.of(), Map.of(), Set.of(), Map.of(), null, true, true,
+                            EXPERIMENT_AUTHOR_AFFINITY_BOOST_ID, experimentVariant);
                 }
                 return getFeed(userId, limit, slice.sourceCursor(), normalized);
             }
@@ -321,7 +338,8 @@ public class FeedServiceImpl implements FeedService {
             // small, documented limitation (see renderPage) — not silently
             // dropped — rather than a reason to change FeedSnapshotStore's
             // storage format for this pass.
-            return renderPage(userId, retained, retainedTrending, Set.of(), Map.of(), slice.nextCursor(), true, true);
+            return renderPage(userId, retained, retainedTrending, Set.of(), Map.of(), slice.nextCursor(), true, true,
+                    EXPERIMENT_AUTHOR_AFFINITY_BOOST_ID, experimentVariant);
         }
 
         int candidateLimit = Math.min(limit * CANDIDATE_WINDOW_MULTIPLIER, MAX_CANDIDATES);
@@ -384,7 +402,9 @@ public class FeedServiceImpl implements FeedService {
         Map<UUID, Double> trendingScores =
                 trendingScoreClient.getScores(candidates.stream().map(Post::getId).toList());
 
-        RankingResult ranking = rankFeed(userId, candidates, trendingScores, affinity, followedAtByAuthor);
+        double authorAffinityBoostWeight = "treatment".equals(experimentVariant) ? AUTHOR_AFFINITY_BOOST_WEIGHT : 0.0;
+        RankingResult ranking =
+                rankFeed(userId, candidates, trendingScores, affinity, followedAtByAuthor, authorAffinityBoostWeight);
         List<Post> ranked = ranking.ranked();
         List<Post> top = ranked.size() > limit ? ranked.subList(0, limit) : ranked;
         String nextCursor = page.nextCursor();
@@ -393,7 +413,7 @@ public class FeedServiceImpl implements FeedService {
                     page.nextCursor(), top.size());
         }
         return renderPage(userId, top, trendingScores, discoveryPostIds, ranking.hashtagBoostByPostId(),
-                nextCursor, cursor != null, false);
+                nextCursor, cursor != null, false, EXPERIMENT_AUTHOR_AFFINITY_BOOST_ID, experimentVariant);
     }
 
     /** Best-effort: an unreachable follow store omits candidates needing it
@@ -493,7 +513,8 @@ public class FeedServiceImpl implements FeedService {
 
     private FeedPageResponse renderPage(UUID userId, List<Post> top, Map<UUID, Double> trendingScores,
             Set<UUID> discoveryPostIds, Map<UUID, Double> hashtagBoostByPostId,
-            String nextCursor, boolean continuation, boolean servedFromSnapshot) {
+            String nextCursor, boolean continuation, boolean servedFromSnapshot,
+            String experimentId, String experimentVariant) {
         // Batch-fetch authors instead of one query per post (a feed's posts
         // usually come from many different authors, unlike a profile page's
         // posts which all share one) — this is the difference between one
@@ -554,7 +575,8 @@ public class FeedServiceImpl implements FeedService {
         }
         if (warehouseEventPublisher != null) {
             warehouseEventPublisher.publishFeedServed(
-                    userId, requestId, lineage, continuation, servedFromSnapshot, nextCursor != null);
+                    userId, requestId, lineage, continuation, servedFromSnapshot, nextCursor != null,
+                    experimentId, experimentVariant);
         }
         return new FeedPageResponse(items, nextCursor, requestId, recommendations);
     }
@@ -566,7 +588,7 @@ public class FeedServiceImpl implements FeedService {
     private record RankingResult(List<Post> ranked, Map<UUID, Double> hashtagBoostByPostId) {}
 
     private RankingResult rankFeed(UUID userId, List<Post> candidates, Map<UUID, Double> trendingScores,
-            float[] affinity, Map<UUID, Instant> followedAtByAuthor) {
+            float[] affinity, Map<UUID, Instant> followedAtByAuthor, double authorAffinityBoostWeight) {
         // affinity is null for users with no post history yet (nothing to compare
         // against) — semanticScore then falls back to a neutral 0.5 per post below,
         // same as when a specific post has no embedding, so engagement + recency
@@ -649,10 +671,13 @@ public class FeedServiceImpl implements FeedService {
                     + HASHTAG_TRENDING_WEIGHT * hashtagTrendScore;
 
             // Multiplicative, not folded into the additive blend above — see
-            // AUTHOR_AFFINITY_BOOST_WEIGHT's own doc comment for why.
+            // AUTHOR_AFFINITY_BOOST_WEIGHT's own doc comment for why. The
+            // weight itself is a caller-supplied parameter, not the constant
+            // directly, so the author_affinity_boost_v1 experiment (see
+            // getFeed) can zero it out for the control group.
             int authorEngagementCount = history.authorCounts().getOrDefault(post.getUserId(), 0);
             double authorAffinityScore = 1.0 - 1.0 / (1 + authorEngagementCount);
-            relevance *= 1 + AUTHOR_AFFINITY_BOOST_WEIGHT * authorAffinityScore;
+            relevance *= 1 + authorAffinityBoostWeight * authorAffinityScore;
 
             // A second, independent multiplicative factor — see
             // FOLLOW_FRESHNESS_BOOST_WEIGHT's own doc comment for why this

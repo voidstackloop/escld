@@ -117,4 +117,30 @@ describe("canonicalMergeSql", () => {
       sql.indexOf("MERGE `project-1.escld_analytics.impression_outcomes`"),
     );
   });
+
+  it("carries experimentId/experimentVariant from canonical_events through feed_requests", () => {
+    const sql = canonicalMergeSql("project-1", "escld_events_raw", "escld_analytics");
+
+    expect(sql).toContain("experimentId STRING, experimentVariant STRING,\n  materializedAt TIMESTAMP NOT NULL");
+    expect(sql).toContain(
+      "INSERT (lineageEventId, requestId, actorId, servedAt, itemCount, continuation,\n  servedFromSnapshot, hasMore, orderedItems, experimentId, experimentVariant, materializedAt)",
+    );
+  });
+
+  it("rolls impression_outcomes up by experiment/variant/day via feed_requests, defaulting untagged requests to 'unassigned'", () => {
+    const sql = canonicalMergeSql("project-1", "escld_events_raw", "escld_analytics");
+
+    expect(sql).toContain("MERGE `project-1.escld_analytics.experiment_daily`");
+    expect(sql).toContain("IFNULL(request.experimentId, 'unassigned') AS experimentId");
+    expect(sql).toContain("IFNULL(request.experimentVariant, 'unassigned') AS experimentVariant");
+    expect(sql).toContain(
+      "JOIN `project-1.escld_analytics.feed_requests` AS request\n    ON request.requestId = outcome.requestId AND request.actorId = outcome.actorId",
+    );
+    expect(sql).toContain("GROUP BY experimentId, experimentVariant, day");
+    // Must run after feed_requests/impression_outcomes are both populated,
+    // not concurrently with them.
+    expect(sql.indexOf("MERGE `project-1.escld_analytics.experiment_daily`")).toBeGreaterThan(
+      sql.indexOf("MERGE `project-1.escld_analytics.impression_outcomes`"),
+    );
+  });
 });

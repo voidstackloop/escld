@@ -157,6 +157,22 @@ for TABLE in \
        ADD COLUMN IF NOT EXISTS sourceOffset STRING"
 done
 
+# message-handler.ts always sets experimentId/experimentVariant on every row
+# it builds (null when absent), and canonicalizer.ts's canonicalMergeSql
+# already SELECTs them as real columns off every raw table — without this,
+# a streaming insert of any event (feed.served included, now that
+# FeedServiceImpl populates them) fails outright against BigQuery's
+# schema-enforced insert instead of just carrying nulls.
+for TABLE in \
+  raw_post_created raw_post_liked raw_post_unliked raw_post_commented raw_post_comment_deleted raw_post_hidden raw_post_unhidden \
+  raw_user_followed raw_user_unfollowed raw_live_started raw_live_ended \
+  raw_post_impression raw_post_dwell raw_feed_served raw_media_progress; do
+  bq query --project_id="${GCP_PROJECT_ID}" --use_legacy_sql=false \
+    "ALTER TABLE \`${GCP_PROJECT_ID}.${DATASET}.${TABLE}\`
+       ADD COLUMN IF NOT EXISTS experimentId STRING,
+       ADD COLUMN IF NOT EXISTS experimentVariant STRING"
+done
+
 echo "==> Creating service account ${SA_EMAIL} (skips if it already exists)"
 gcloud iam service-accounts create "${SA_NAME}" \
   --project "${GCP_PROJECT_ID}" \

@@ -91,7 +91,13 @@ class FeedServiceImplTest {
 
     private FeedServiceImpl feedService;
 
-    private final UUID viewerId = UUID.randomUUID();
+    // Fixed, not random: FeedServiceImpl now deterministically hashes viewerId
+    // into the author_affinity_boost_v1 experiment (see ExperimentAssignment).
+    // A random UUID here would make
+    // ranksACandidateFromAPreviouslyEngagedAuthorAboveAnOtherwiseIdenticalOne
+    // flaky (~50% of runs would land in "control", where that boost is off).
+    // This literal was checked to land in "treatment" for that experiment id.
+    private final UUID viewerId = UUID.fromString("00000000-0000-0000-0000-000000000001");
 
     @BeforeEach
     void setUp() {
@@ -555,7 +561,7 @@ class FeedServiceImplTest {
                                 && items.get(0).source().equals("following_inbox")
                                 && items.get(1).postId().equals(second.getId())
                                 && items.get(1).position() == 2),
-                eq(false), eq(false), eq(false));
+                eq(false), eq(false), eq(false), any(), any());
     }
 
     @Test

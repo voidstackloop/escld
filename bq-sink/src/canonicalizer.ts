@@ -130,10 +130,16 @@ CLUSTER BY actorId, postId, requestId;
 CREATE TABLE IF NOT EXISTS \`${project}.${analytics}.feed_requests\` (
   lineageEventId STRING NOT NULL, requestId STRING NOT NULL, actorId STRING NOT NULL, servedAt TIMESTAMP NOT NULL,
   itemCount INT64 NOT NULL, continuation BOOL NOT NULL, servedFromSnapshot BOOL NOT NULL,
-  hasMore BOOL NOT NULL, orderedItems JSON NOT NULL, materializedAt TIMESTAMP NOT NULL
+  hasMore BOOL NOT NULL, orderedItems JSON NOT NULL,
+  experimentId STRING, experimentVariant STRING,
+  materializedAt TIMESTAMP NOT NULL
 )
 PARTITION BY DATE(servedAt)
 CLUSTER BY actorId, requestId;
+
+ALTER TABLE \`${project}.${analytics}.feed_requests\`
+ADD COLUMN IF NOT EXISTS experimentId STRING,
+ADD COLUMN IF NOT EXISTS experimentVariant STRING;
 
 CREATE TABLE IF NOT EXISTS \`${project}.${analytics}.impression_outcomes\` (
   impressionId STRING NOT NULL, actorId STRING NOT NULL, postId STRING NOT NULL,
@@ -181,7 +187,8 @@ USING (
     IFNULL(SAFE_CAST(JSON_VALUE(payload, '$.continuation') AS BOOL), FALSE) AS continuation,
     IFNULL(SAFE_CAST(JSON_VALUE(payload, '$.servedFromSnapshot') AS BOOL), FALSE) AS servedFromSnapshot,
     IFNULL(SAFE_CAST(JSON_VALUE(payload, '$.hasMore') AS BOOL), FALSE) AS hasMore,
-    JSON_QUERY(payload, '$.orderedItems') AS orderedItems
+    JSON_QUERY(payload, '$.orderedItems') AS orderedItems,
+    experimentId, experimentVariant
   FROM \`${project}.${analytics}.canonical_events\`
   WHERE eventType = 'feed.served'
     AND ingestedAt >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @lookbackDays DAY)
@@ -191,9 +198,10 @@ USING (
 ) AS source
 ON target.requestId = source.requestId
 WHEN NOT MATCHED THEN INSERT (lineageEventId, requestId, actorId, servedAt, itemCount, continuation,
-  servedFromSnapshot, hasMore, orderedItems, materializedAt)
+  servedFromSnapshot, hasMore, orderedItems, experimentId, experimentVariant, materializedAt)
 VALUES (source.lineageEventId, source.requestId, source.actorId, source.servedAt, source.itemCount, source.continuation,
-  source.servedFromSnapshot, source.hasMore, source.orderedItems, CURRENT_TIMESTAMP());
+  source.servedFromSnapshot, source.hasMore, source.orderedItems, source.experimentId, source.experimentVariant,
+  CURRENT_TIMESTAMP());
 
 MERGE \`${project}.${analytics}.feed_impressions\` AS target
 USING (
@@ -582,5 +590,52 @@ VALUES (source.authorId, source.day, source.qualifiedReach, source.qualifiedImpr
   source.meaningfulCount, source.hideCount, source.distinctPosts,
   source.watchTimeMs, source.likeCount, source.commentCount, source.newFollowerCount, source.asOf,
   source.provisional, CURRENT_TIMESTAMP());
+
+-- Per-day engagement rollup by A/B experiment/variant (see
+-- ExperimentAssignment.java and FeedServiceImpl's author_affinity_boost_v1)
+-- — feed_requests already carries the experimentId/experimentVariant a
+-- feed.served event was tagged with; impression_outcomes' requestId links
+-- each attributed impression back to the exact request that served it, so
+-- this needs no new join key, just grouping what's already there by
+-- variant instead of by postId/authorId. Absent for viewers on a build that
+-- predates this experiment (both columns null) rolls up as its own
+-- 'unassigned' bucket rather than silently vanishing from the aggregate.
+CREATE TABLE IF NOT EXISTS \`${project}.${analytics}.experiment_daily\` (
+  experimentId STRING NOT NULL, experimentVariant STRING NOT NULL, day DATE NOT NULL,
+  impressions INT64 NOT NULL, meaningfulCount INT64 NOT NULL, likeCount INT64 NOT NULL,
+  commentCount INT64 NOT NULL, hideCount INT64 NOT NULL, watchTimeMs INT64 NOT NULL,
+  provisional BOOL NOT NULL, materializedAt TIMESTAMP NOT NULL
+)
+PARTITION BY day
+CLUSTER BY experimentId, experimentVariant;
+
+MERGE \`${project}.${analytics}.experiment_daily\` AS target
+USING (
+  SELECT IFNULL(request.experimentId, 'unassigned') AS experimentId,
+    IFNULL(request.experimentVariant, 'unassigned') AS experimentVariant,
+    DATE(outcome.impressionAt) AS day,
+    COUNT(*) AS impressions,
+    COUNTIF(outcome.meaningful) AS meaningfulCount,
+    COUNTIF(outcome.liked) AS likeCount,
+    COUNTIF(outcome.commented) AS commentCount,
+    COUNTIF(outcome.hidden) AS hideCount,
+    SUM(outcome.watchTimeMs) AS watchTimeMs,
+    LOGICAL_OR(outcome.provisional) AS provisional
+  FROM \`${project}.${analytics}.impression_outcomes\` AS outcome
+  JOIN \`${project}.${analytics}.feed_requests\` AS request
+    ON request.requestId = outcome.requestId AND request.actorId = outcome.actorId
+  WHERE outcome.impressionAt >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @outcomeLookbackDays DAY)
+  GROUP BY experimentId, experimentVariant, day
+) AS source
+ON target.experimentId = source.experimentId AND target.experimentVariant = source.experimentVariant
+  AND target.day = source.day
+WHEN MATCHED THEN UPDATE SET impressions = source.impressions, meaningfulCount = source.meaningfulCount,
+  likeCount = source.likeCount, commentCount = source.commentCount, hideCount = source.hideCount,
+  watchTimeMs = source.watchTimeMs, provisional = source.provisional, materializedAt = CURRENT_TIMESTAMP()
+WHEN NOT MATCHED THEN INSERT (experimentId, experimentVariant, day, impressions, meaningfulCount,
+  likeCount, commentCount, hideCount, watchTimeMs, provisional, materializedAt)
+VALUES (source.experimentId, source.experimentVariant, source.day, source.impressions, source.meaningfulCount,
+  source.likeCount, source.commentCount, source.hideCount, source.watchTimeMs, source.provisional,
+  CURRENT_TIMESTAMP());
 `;
 }

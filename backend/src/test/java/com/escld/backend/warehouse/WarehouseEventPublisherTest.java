@@ -79,7 +79,7 @@ class WarehouseEventPublisherTest {
         boolean accepted = publisher.publishFeedServed(viewerId, requestId,
                 List.of(new WarehouseEventPublisher.ServedRecommendation(
                         postId, 1, "following_inbox", "following")),
-                true, true, false);
+                true, true, false, "author_affinity_boost_v1", "treatment");
 
         ArgumentCaptor<WarehouseEvent> eventCaptor = ArgumentCaptor.forClass(WarehouseEvent.class);
         verify(outboxStore).enqueue(eventCaptor.capture());
@@ -89,6 +89,8 @@ class WarehouseEventPublisherTest {
         assertThat(event.partitionKey()).isEqualTo(viewerId.toString());
         assertThat(event.entityType()).isEqualTo("feed_request");
         assertThat(event.entityId()).isEqualTo(requestId.toString());
+        assertThat(event.experimentId()).isEqualTo("author_affinity_boost_v1");
+        assertThat(event.experimentVariant()).isEqualTo("treatment");
         assertThat(event.payload()).containsEntry("requestId", requestId.toString())
                 .containsEntry("itemCount", 1)
                 .containsEntry("continuation", true)
@@ -104,7 +106,7 @@ class WarehouseEventPublisherTest {
                 .when(outboxStore).enqueue(any());
 
         boolean accepted = publisher.publishFeedServed(UUID.randomUUID(), UUID.randomUUID(), List.of(),
-                false, false, false);
+                false, false, false, null, null);
 
         assertThat(accepted).isFalse();
         verify(emfMetrics).increment("warehouse_outbox_enqueue_failed_total",

@@ -148,10 +148,11 @@ public class WarehouseEventPublisher {
      * structured log entry.
      */
     public boolean publishFeedServed(UUID viewerId, UUID requestId, List<ServedRecommendation> orderedItems,
-            boolean continuation, boolean servedFromSnapshot, boolean hasMore) {
+            boolean continuation, boolean servedFromSnapshot, boolean hasMore,
+            String experimentId, String experimentVariant) {
         try {
             enqueue(TOPIC_FEED_SERVED, viewerId.toString(), viewerId, "feed_request", requestId.toString(), null,
-                    null, requestId, null, null,
+                    null, requestId, experimentId, experimentVariant,
                     Map.of(
                             "requestId", requestId.toString(),
                             "itemCount", orderedItems.size(),
