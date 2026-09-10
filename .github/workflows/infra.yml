@@ -26,6 +26,25 @@ jobs:
           cache: npm
           cache-dependency-path: infra/package-lock.json
 
+      # FrontendStack's BucketDeployment (lib/frontend-stack.ts) bundles
+      # `../frontend/dist` as a real CDK asset at synth time — every real
+      # `cdk deploy` needs the frontend built first regardless, and
+      # frontend-stack.test.ts exercises that same code path, so it needs
+      # a real dist/ here too, not a stub. Mirrors frontend.yml's own
+      # build steps (including the amplify_outputs.json placeholder — see
+      # its comment there) rather than duplicating a different recipe.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build frontend (needed by FrontendStack's asset bundling)
+        working-directory: frontend
+        run: |
+          cp amplify_outputs.example.json amplify_outputs.json
+          npm install
+          npm run build
+
       - name: Install
         run: npm ci
 
