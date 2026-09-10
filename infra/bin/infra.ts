@@ -54,11 +54,16 @@ const computeStack = new ComputeStack(app, 'EscldComputeStack', {
   vpc: networkStack.vpc,
 });
 
+// `-c dbMultiAz=false` drops to single-AZ for a throwaway test deploy (half the
+// RDS cost, and only needs capacity in one AZ). Anything other than the literal
+// string 'false' keeps the production Multi-AZ default.
+const dbMultiAz = app.node.tryGetContext('dbMultiAz') !== 'false';
 const databaseStack = new DatabaseStack(app, 'EscldDatabaseStack', {
   env,
-  description: 'RDS Postgres (Multi-AZ) for users/posts/comments',
+  description: `RDS Postgres (${dbMultiAz ? 'Multi-AZ' : 'single-AZ'}) for users/posts/comments`,
   vpc: networkStack.vpc,
   appServiceSecurityGroup: computeStack.appServiceSecurityGroup,
+  multiAz: dbMultiAz,
 });
 
 // Pulled forward from Phase 4 — the backend can't boot without it (see

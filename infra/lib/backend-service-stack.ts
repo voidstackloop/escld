@@ -189,7 +189,18 @@ export class BackendServiceStack extends cdk.Stack {
         // the filesystem/volume side, not this string. See otel-sidecar.ts
         // for why Java's ADOT wiring needs an init container at all, unlike
         // Node's NODE_OPTIONS-only approach in analytics-service-stack.ts.
-        JAVA_TOOL_OPTIONS: `-Xmx1536m -XX:MaxMetaspaceSize=192m ${JAVA_ADOT_AGENT_FLAG}`,
+        // MaxMetaspaceSize is 384m, not the 192m this ran with before Phase 1:
+        // 192m was sized for a plain Spring Boot app, and the ADOT javaagent
+        // added here instruments Spring/Tomcat/JDBC/Lettuce/Kafka/Elasticsearch/
+        // the AWS SDK, generating enough extra loaded classes to exhaust it.
+        // A real deploy died with "OutOfMemoryError: Metaspace" once traffic
+        // hit it — and because a metaspace-starved JVM can't load new classes,
+        // the failure surfaced as the Redis/Elasticsearch health indicators
+        // throwing, so /actuator/health reported DOWN and every task was
+        // pulled from the load balancer while the app itself still served
+        // requests. Budget at 3072 task MiB: 1536 heap + 384 metaspace +
+        // ~350 JVM overhead + the sidecar's 256 reservation still leaves room.
+        JAVA_TOOL_OPTIONS: `-Xmx1536m -XX:MaxMetaspaceSize=384m ${JAVA_ADOT_AGENT_FLAG}`,
         ...otelEnvVars('escld-backend'),
         ...(props.mskClusterArn
           ? { KAFKA_ENABLED: 'true', KAFKA_CLUSTER_ARN: props.mskClusterArn }
@@ -200,18 +211,34 @@ export class BackendServiceStack extends cdk.Stack {
         SPRING_DATASOURCE_PASSWORD: ecs.Secret.fromSecretsManager(props.dbSecret, 'password'),
         FEED_CURSOR_SIGNING_KEY: ecs.Secret.fromSecretsManager(feedCursorSigningKey),
       },
-      // Same /dev/tcp raw-socket probe docker-compose uses (see
-      // docker-compose.yaml backend healthcheck comment) — the eclipse-temurin
-      // JRE base image ships neither curl nor wget.
+      // A /dev/tcp raw-socket probe, because the eclipse-temurin JRE base
+      // image ships neither curl nor wget.
+      //
+      // 'CMD' + an explicit 'bash', NOT 'CMD-SHELL': ECS runs a CMD-SHELL
+      // string through /bin/sh, and /bin/sh in eclipse-temurin:25-jre is a
+      // symlink to dash, which does not implement /dev/tcp at all (verified
+      // by running the real image: "sh: cannot create /dev/tcp/...:
+      // Directory nonexistent"). Under CMD-SHELL this probe could therefore
+      // never pass however healthy the app was, so ECS marked every task
+      // UNHEALTHY and replaced it forever. /dev/tcp is a bash builtin and
+      // bash is present at /usr/bin/bash, so invoking it explicitly is the
+      // fix. Do not "simplify" this back to CMD-SHELL.
       healthCheck: {
         command: [
-          'CMD-SHELL',
+          'CMD',
+          'bash',
+          '-c',
           'exec 3<>/dev/tcp/127.0.0.1/9090 && printf \'GET /actuator/health HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n\' >&3 && grep -q \'"status":"UP"\' <&3',
         ],
         interval: cdk.Duration.seconds(10),
         timeout: cdk.Duration.seconds(5),
         retries: 10,
-        startPeriod: cdk.Duration.seconds(30),
+        // Measured against a real deploy: this container reaches "Started
+        // BackendApplication" ~85s after its first log line (JVM + the ADOT
+        // javaagent's class-loading + Spring context + Flyway). A 30s
+        // startPeriod meant the probe spent ~55s of that boot burning
+        // retries for no reason.
+        startPeriod: cdk.Duration.seconds(120),
       },
     });
     container.addPortMappings(
@@ -242,6 +269,15 @@ export class BackendServiceStack extends cdk.Stack {
       // task. 100/200 keeps full capacity up throughout every deploy instead.
       minHealthyPercent: 100,
       maxHealthyPercent: 200,
+      // CDK defaults this to 60s the moment a load balancer target is
+      // attached, which is shorter than this app's own boot: a real deploy
+      // measured 83-85s from container start to a serving /actuator/health,
+      // while the ALB declares a fresh target unhealthy after 2 failed
+      // checks (2 x 30s = 60s). The grace period expired ~25s before the
+      // app could ever answer, so ECS killed every task mid-boot and the
+      // service crash-looped forever with a perfectly healthy application.
+      // 240s leaves real headroom over the measured 85s for a cold start.
+      healthCheckGracePeriod: cdk.Duration.seconds(240),
     });
 
     const targetGroup = new elbv2.ApplicationTargetGroup(this, 'TargetGroup', {
@@ -256,6 +292,21 @@ export class BackendServiceStack extends cdk.Stack {
         port: '9090',
         path: '/actuator/health',
         healthyHttpCodes: '200',
+        // Explicit, not the ALB defaults (30s interval / 5 healthy / 2
+        // unhealthy), because those defaults interact badly with an ~85s JVM
+        // boot in both directions:
+        //   - going healthy took 5 x 30s = 150s AFTER boot, i.e. ~235s from
+        //     task start, which barely fits inside the grace period above and
+        //     left no margin for a slow ECR pull or a busy host.
+        //   - going unhealthy took only 2 x 30s = 60s, so one blip in a shared
+        //     dependency could yank every task out of service at once.
+        // 15s/2 reaches healthy ~30s after boot (~115s total, comfortably
+        // inside the grace period) while 5 failures now need 75s, making a
+        // transient stumble less likely to cascade into a full outage.
+        interval: cdk.Duration.seconds(15),
+        timeout: cdk.Duration.seconds(5),
+        healthyThresholdCount: 2,
+        unhealthyThresholdCount: 5,
       },
     });
 
@@ -313,7 +364,14 @@ export class BackendServiceStack extends cdk.Stack {
     notify(new cloudwatch.Alarm(this, 'HighErrorRateAlarm', {
       alarmDescription: 'Backend 5xx rate above 5% over 5 minutes',
       metric: new cloudwatch.MathExpression({
-        expression: 'errors / MAX([requests, 1])',
+        // Guards divide-by-zero on idle periods. NOT `MAX([requests, 1])`:
+        // CloudWatch's MAX() reduces one time series to a scalar, it is not an
+        // element-wise max over two operands, so that form is rejected at
+        // alarm-creation time with "Unsupported operand type(s) for MAX:
+        // [Array[TimeSeries, Scalar]]". IF() is the construct that actually
+        // does per-datapoint branching — no requests in a period reads as a
+        // 0% error rate rather than a gap.
+        expression: 'IF(requests > 0, errors / requests, 0)',
         usingMetrics: { errors: errorCount, requests: requestCount },
         period: cdk.Duration.minutes(5),
       }),

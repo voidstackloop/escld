@@ -90,7 +90,7 @@ test('grants a dedicated security group (for the out-of-app Amplify Cognito trig
     IpProtocol: 'tcp',
     FromPort: 5432,
     ToPort: 5432,
-    Description: 'Amplify Cognito trigger Lambdas -> Postgres',
+    Description: 'Amplify Cognito trigger Lambdas to Postgres',
   });
 
   const outputs = template.findOutputs('*');

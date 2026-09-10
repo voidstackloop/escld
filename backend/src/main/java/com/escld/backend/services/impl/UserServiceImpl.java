@@ -116,7 +116,20 @@ public class UserServiceImpl implements UserService {
             log.info("Provisioned new user profile for Cognito identity {}", cognitoSub);
             return saved;
         } catch (DataIntegrityViolationException e) {
-            throw new UsernameAlreadyTakenException(preferredUsername);
+            // Which unique constraint actually tripped changes the answer, so
+            // don't assume it was the username one. A brand-new user's very
+            // first page load fires several authenticated requests in
+            // parallel (the feed and /users/me at minimum); each finds no row
+            // yet and tries to provision, and the losers trip
+            // users_cognito_sub_key. That is not a username collision — it is
+            // the same person, provisioned microseconds earlier by whichever
+            // request won — so re-read and return that row rather than
+            // failing a legitimate sign-in. Observed for real against the
+            // deployed stack, where the losing request's /api/v1/feed 500'd.
+            // A genuine username collision finds nothing here and still
+            // surfaces as the 409 the frontend already knows how to render.
+            return userRepository.findByCognitoSub(cognitoSub)
+                    .orElseThrow(() -> new UsernameAlreadyTakenException(preferredUsername));
         }
     }
 

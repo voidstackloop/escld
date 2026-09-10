@@ -97,14 +97,14 @@ export class WsSfuStack extends cdk.Stack {
 
     const securityGroup = new ec2.SecurityGroup(this, 'WsSfuSecurityGroup', {
       vpc: props.vpc,
-      description: 'escld ws-sfu — signaling from the ALB only, WebRTC media UDP range public (no way around this for a self-hosted SFU)',
+      description: 'escld ws-sfu - signaling from the ALB only, WebRTC media UDP range public (no way around this for a self-hosted SFU)',
       allowAllOutbound: true,
     });
     securityGroup.addIngressRule(props.albSecurityGroup, ec2.Port.tcp(4000), 'Socket.IO signaling from the ALB');
     securityGroup.addIngressRule(
       ec2.Peer.anyIpv4(),
       ec2.Port.udpRange(40000, 40999),
-      'WebRTC media (RTP/RTCP) — clients connect directly, cannot go through the ALB',
+      'WebRTC media (RTP/RTCP) - clients connect directly, cannot go through the ALB',
     );
 
     const role = new iam.Role(this, 'InstanceRole', {

@@ -7,6 +7,12 @@ export interface DatabaseStackProps extends cdk.StackProps {
   vpc: ec2.IVpc;
   /** Backend Fargate tasks' security group (from ComputeStack) — granted inbound 5432 below. */
   appServiceSecurityGroup: ec2.ISecurityGroup;
+  /** Defaults to true (the production posture: automatic failover, see the
+   * instance's own comment). Set false only for a throwaway test deploy —
+   * Multi-AZ needs RDS capacity in two AZs simultaneously and costs roughly
+   * double, and a real `insufficient-capacity` failure in eu-central-1 is
+   * what made this configurable. Wired to the `dbMultiAz` CDK context flag. */
+  multiAz?: boolean;
 }
 
 export class DatabaseStack extends cdk.Stack {
@@ -33,18 +39,18 @@ export class DatabaseStack extends cdk.Stack {
     this.dbSecurityGroup.addIngressRule(
       props.appServiceSecurityGroup,
       ec2.Port.tcp(5432),
-      'Backend Fargate tasks -> Postgres',
+      'Backend Fargate tasks to Postgres',
     );
 
     this.authLambdaSecurityGroup = new ec2.SecurityGroup(this, 'AuthLambdaSecurityGroup', {
       vpc: props.vpc,
-      description: 'escld Amplify Cognito trigger Lambdas (postConfirmation, preSignUp) — VPC-attached so they can reach Postgres, a PRIVATE_ISOLATED-subnet instance no default (non-VPC) Lambda execution environment can route to at all',
+      description: 'escld Amplify Cognito trigger Lambdas (postConfirmation, preSignUp) - VPC-attached so they can reach Postgres, a PRIVATE_ISOLATED-subnet instance no default (non-VPC) Lambda execution environment can route to at all',
       allowAllOutbound: true,
     });
     this.dbSecurityGroup.addIngressRule(
       this.authLambdaSecurityGroup,
       ec2.Port.tcp(5432),
-      'Amplify Cognito trigger Lambdas -> Postgres',
+      'Amplify Cognito trigger Lambdas to Postgres',
     );
 
     // users/posts/comments — the relational, admin-queryable data the moderation
@@ -59,14 +65,20 @@ export class DatabaseStack extends cdk.Stack {
       // Right-sized for the ~350-450 req/s peak / ~5-8 backend replicas estimated
       // for 100k DAU (see plan) — a connection ceiling of a few hundred comfortably
       // covers 4-8 replicas x a Hikari pool of 10. Bump before adding a read replica.
-      instanceType: ec2.InstanceType.of(ec2.InstanceClass.T4G, ec2.InstanceSize.MEDIUM),
+      //
+      // T3 (Intel), not T4G (Graviton): a real `insufficient-capacity` failure on
+      // db.t4g.medium in eu-central-1 blocked this stack's first deploy. Graviton
+      // RDS pools in this region run tight; T3 draws from a separate, broader pool
+      // for the same class size and near-identical price. Revisit T4G (~10-20%
+      // cheaper) once capacity there is reliable.
+      instanceType: ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MEDIUM),
       allocatedStorage: 50,
       maxAllocatedStorage: 200,
       storageType: rds.StorageType.GP3,
       // Multi-AZ for automatic failover, not for read scaling — the load
       // estimate doesn't justify a read replica on day one (see plan's
-      // "what to revisit" section).
-      multiAz: true,
+      // "what to revisit" section). Defaults on; see props.multiAz.
+      multiAz: props.multiAz ?? true,
       databaseName: 'escld',
       credentials: rds.Credentials.fromGeneratedSecret('escld_app'),
       backupRetention: cdk.Duration.days(7),

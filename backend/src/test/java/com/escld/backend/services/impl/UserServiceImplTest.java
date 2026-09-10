@@ -98,6 +98,25 @@ class UserServiceImplTest {
                 .isInstanceOf(UsernameAlreadyTakenException.class);
     }
 
+    @Test
+    void returnsTheWinnersRowWhenAConcurrentRequestProvisionedTheSameIdentityFirst() {
+        // A brand-new user's first page load fires several authenticated
+        // requests at once (the feed and /users/me at minimum). All of them
+        // find no row, all try to provision, and the losers trip
+        // users_cognito_sub_key rather than the username index. Seen for real
+        // against the deployed stack, where the loser's /api/v1/feed 500'd.
+        User winner = User.builder().id(UUID.randomUUID()).cognitoSub(cognitoSub).username("racer").build();
+        when(userRepository.findByCognitoSub(cognitoSub))
+                .thenReturn(Optional.empty())     // our own initial lookup
+                .thenReturn(Optional.of(winner)); // re-read after the constraint fires
+        when(userRepository.save(any(User.class)))
+                .thenThrow(new DataIntegrityViolationException("duplicate key value violates unique constraint \"users_cognito_sub_key\""));
+        when(cognitoUserAttributesClient.fetchAttributes("test-token"))
+                .thenReturn(attributes("racer@example.com", "racer", null));
+
+        assertThat(userService.getOrProvisionByCognitoSub(jwtFor(cognitoSub))).isSameAs(winner);
+    }
+
     private Map<String, String> attributes(String email, String preferredUsername, String picture) {
         Map<String, String> attrs = new HashMap<>();
         attrs.put("email", email);

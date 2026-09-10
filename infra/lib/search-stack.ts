@@ -51,13 +51,13 @@ export class SearchStack extends cdk.Stack {
 
     this.securityGroup = new ec2.SecurityGroup(this, 'SearchSecurityGroup', {
       vpc: props.vpc,
-      description: 'escld Elasticsearch — no auth (xpack.security disabled, matching dev), so this must stay app-tier-only, never public',
+      description: 'escld Elasticsearch - no auth (xpack.security disabled, matching dev), so this must stay app-tier-only, never public',
       allowAllOutbound: true,
     });
     this.securityGroup.addIngressRule(
       props.appServiceSecurityGroup,
       ec2.Port.tcp(9200),
-      'App-tier Fargate tasks -> Elasticsearch',
+      'App-tier Fargate tasks to Elasticsearch',
     );
 
     const fileSystem = new efs.FileSystem(this, 'SearchData', {
@@ -66,7 +66,7 @@ export class SearchStack extends cdk.Stack {
       encrypted: true,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
-    fileSystem.connections.allowDefaultPortFrom(this.securityGroup, 'Fargate task -> EFS mount target (NFS)');
+    fileSystem.connections.allowDefaultPortFrom(this.securityGroup, 'Fargate task to EFS mount target (NFS)');
 
     const accessPoint = fileSystem.addAccessPoint('SearchDataAccessPoint', {
       path: '/elasticsearch-data',
@@ -107,8 +107,14 @@ export class SearchStack extends cdk.Stack {
         command: ['CMD-SHELL', 'curl -sf http://localhost:9200/_cluster/health || exit 1'],
         interval: cdk.Duration.seconds(10),
         timeout: cdk.Duration.seconds(5),
-        retries: 20,
-        startPeriod: cdk.Duration.seconds(60),
+        // ECS caps retries at 10 — a previous `retries: 20` here failed the
+        // CreateTaskDefinition API outright. The intent was a long grace
+        // period for Elasticsearch's slow first boot (JVM start + index
+        // recovery off the EFS volume), so that budget moves into
+        // startPeriod, which has no such cap: 180s before health checks
+        // count at all, then 10 x 10s of retries on top.
+        retries: 10,
+        startPeriod: cdk.Duration.seconds(180),
       },
     });
     container.addPortMappings({ containerPort: 9200 });
@@ -122,7 +128,21 @@ export class SearchStack extends cdk.Stack {
       cluster: props.cluster,
       taskDefinition,
       securityGroups: [this.securityGroup],
-      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+      // PRIVATE_WITH_EGRESS, not PRIVATE_ISOLATED: a Fargate task needs to
+      // reach ECR (image pull) and CloudWatch Logs (the awslogs driver) before
+      // the container ever starts. From an isolated subnet with no NAT and no
+      // ECR/Logs VPC endpoints, that fails at task start with
+      // "ResourceInitializationError: ... cannot find the Amazon CloudWatch log
+      // group ... connection issue between the task and Amazon CloudWatch" —
+      // which is exactly what blocked this stack's first deploy.
+      //
+      // This does not weaken the "app-tier-only, never public" rule this
+      // stack's security group enforces (see its description): these subnets
+      // still have no inbound route from the internet, and nothing on the ALB
+      // routes here. The alternative — interface endpoints for ecr.api,
+      // ecr.dkr and logs, plus an S3 gateway endpoint — costs real money per
+      // AZ to buy back outbound access the NAT already provides.
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
       // Single node by design (see class doc) — do not raise this without
       // first giving Elasticsearch real multi-node cluster configuration.
       desiredCount: 1,

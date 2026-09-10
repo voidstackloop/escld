@@ -39,11 +39,11 @@ export class CacheStack extends cdk.Stack {
     this.securityGroup.addIngressRule(
       props.appServiceSecurityGroup,
       ec2.Port.tcp(6379),
-      'Backend Fargate tasks -> Redis',
+      'Backend Fargate tasks to Redis',
     );
 
     const subnetGroup = new elasticache.CfnSubnetGroup(this, 'RedisSubnetGroup', {
-      description: 'Isolated subnets — Redis has no route to the internet and needs none',
+      description: 'Isolated subnets - Redis has no route to the internet and needs none',
       subnetIds: props.vpc.selectSubnets({ subnetType: ec2.SubnetType.PRIVATE_ISOLATED }).subnetIds,
     });
 

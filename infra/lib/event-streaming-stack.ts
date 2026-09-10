@@ -40,13 +40,13 @@ export class EventStreamingStack extends cdk.Stack {
 
     this.securityGroup = new ec2.SecurityGroup(this, 'MskSecurityGroup', {
       vpc: props.vpc,
-      description: 'escld MSK Serverless — Kafka (SASL/IAM, port 9098) from app services only',
+      description: 'escld MSK Serverless - Kafka (SASL/IAM, port 9098) from app services only',
       allowAllOutbound: false,
     });
     this.securityGroup.addIngressRule(
       props.appServiceSecurityGroup,
       ec2.Port.tcp(9098),
-      'Backend producer / bq-sink consumer -> MSK',
+      'Backend producer / bq-sink consumer to MSK',
     );
 
     this.cluster = new msk.CfnServerlessCluster(this, 'Cluster', {

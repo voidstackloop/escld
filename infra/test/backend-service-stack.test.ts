@@ -109,6 +109,35 @@ test('health-checks the actuator port, not the JWT-protected public API port', (
   });
 });
 
+test('gives the JVM longer to boot than the ALB takes to declare a target unhealthy', () => {
+  const app = new cdk.App();
+  const { backend } = buildStack(app, '3a');
+  const template = Template.fromStack(backend);
+
+  // A real deploy measured 83-85s from container start to a serving
+  // /actuator/health. CDK's own default grace period (60s, applied silently
+  // once an ALB target is attached) is shorter than that, and the ALB gives
+  // up after UnhealthyThresholdCount x Interval — so every task was killed
+  // mid-boot and the service crash-looped with a healthy application.
+  // Guard the invariant, not just the literal: grace must outlast the ALB.
+  const service = Object.values(
+    template.findResources('AWS::ECS::Service'),
+  )[0] as { Properties: { HealthCheckGracePeriodSeconds: number } };
+  const targetGroup = Object.values(
+    template.findResources('AWS::ElasticLoadBalancingV2::TargetGroup'),
+  )[0] as { Properties: { HealthCheckIntervalSeconds?: number; UnhealthyThresholdCount?: number } };
+
+  const grace = service.Properties.HealthCheckGracePeriodSeconds;
+  // Fall back to the ALB's own documented defaults when the template leaves
+  // them implicit, which is exactly the case that bit us.
+  const albGivesUpAfter =
+    (targetGroup.Properties.HealthCheckIntervalSeconds ?? 30) *
+    (targetGroup.Properties.UnhealthyThresholdCount ?? 2);
+
+  expect(grace).toBeGreaterThan(albGivesUpAfter);
+  expect(grace).toBeGreaterThan(85 * 2);
+});
+
 test('grants the task role read/write on every DynamoDB table and send on both SQS queues', () => {
   const app = new cdk.App();
   const { backend } = buildStack(app, '4');

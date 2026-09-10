@@ -123,13 +123,13 @@ export class RtmpServiceStack extends cdk.Stack {
 
     const securityGroup = new ec2.SecurityGroup(this, 'RtmpSecurityGroup', {
       vpc: props.vpc,
-      description: 'escld rtmp — RTMP ingest (1935) public (any encoder, anywhere), HTTP (4001) from the ALB only',
+      description: 'escld rtmp - RTMP ingest (1935) public (any encoder, anywhere), HTTP (4001) from the ALB only',
       allowAllOutbound: true,
     });
     securityGroup.addIngressRule(
       ec2.Peer.anyIpv4(),
       ec2.Port.tcp(1935),
-      'RTMP publish — encoders (OBS, ffmpeg) connect directly, cannot go through the ALB',
+      'RTMP publish - encoders (OBS, ffmpeg) connect directly, cannot go through the ALB',
     );
     securityGroup.addIngressRule(props.albSecurityGroup, ec2.Port.tcp(4001), 'Health check + local HLS serving from the ALB');
 
