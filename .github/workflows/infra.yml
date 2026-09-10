@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -33,7 +33,7 @@ jobs:
       # a real dist/ here too, not a stub. Mirrors frontend.yml's own
       # build steps (including the amplify_outputs.json placeholder — see
       # its comment there) rather than duplicating a different recipe.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
