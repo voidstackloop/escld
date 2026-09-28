@@ -4,6 +4,20 @@ A social media app — posts, comments, likes, follows, moderation — with real
 
 Built as eight services: a React SPA, a Java/Spring Boot API, two Rust services (WebRTC SFU + messaging, and RTMP live-streaming ingest), three small background workers (transcoding, feed fan-out, trending), and an AWS CDK infrastructure app. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for how they fit together.
 
+## Architecture
+
+![escld architecture](docs/images/diagram-architecture.svg)
+
+The call setup sequence and the RTMP to HLS pipeline are in [docs/diagrams.md](docs/diagrams.md).
+
+<details>
+<summary>Screenshots from a local run</summary>
+
+![Sign in](docs/images/app-login.png)
+![Sign up](docs/images/app-sign-up.png)
+![docker compose ps](docs/images/terminal-compose-ps.png)
+</details>
+
 ## Quick start
 
 Requires Docker and Docker Compose.
