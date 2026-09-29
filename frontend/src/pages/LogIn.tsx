@@ -97,7 +97,7 @@ export default function LogIn() {
               type={showPassword ? "text" : "password"}
               autoComplete="current-password"
               required
-              placeholder="????????"
+              placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="h-10.5 pl-10 pr-10 rounded-full text-xs sm:text-sm bg-muted/40 border-border/50 focus:bg-background"

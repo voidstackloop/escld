@@ -139,14 +139,14 @@ export function CallPanel({
                 <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
                 Live WebRTC SFU
               </span>
-              <span>?</span>
+              <span>·</span>
               <span className="flex items-center gap-1">
                 <Users className="size-3" />
                 {call.participants.length + (call.joined ? 1 : 0)} in call
               </span>
               {isRecording && (
                 <>
-                  <span>?</span>
+                  <span>·</span>
                   <span className="flex items-center gap-1 text-rose-400 font-semibold" title={recordingStartedBy ? `Started by ${recordingStartedBy}` : undefined}>
                     <Circle className="size-2 fill-rose-500 text-rose-500 animate-pulse" />
                     REC

@@ -131,7 +131,7 @@ export default function SignUp() {
               type={showPassword ? "text" : "password"}
               autoComplete="new-password"
               required
-              placeholder="????????"
+              placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="h-10.5 pl-10 pr-10 rounded-full text-xs sm:text-sm bg-muted/40 border-border/50 focus:bg-background"
@@ -177,7 +177,7 @@ export default function SignUp() {
               type={showPassword ? "text" : "password"}
               autoComplete="new-password"
               required
-              placeholder="????????"
+              placeholder="••••••••"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               className="h-10.5 pl-10 rounded-full text-xs sm:text-sm bg-muted/40 border-border/50 focus:bg-background"

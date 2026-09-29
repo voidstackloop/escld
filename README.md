@@ -74,3 +74,7 @@ Each service has its own test suite — see the table at the bottom of [`docs/LO
 ## Deploying
 
 Infrastructure is defined in `infra/` (AWS CDK). `cdk synth` is always safe to run and is how infra changes are verified; `cdk deploy` creates real AWS resources and should never be run casually. See [`docs/INFRASTRUCTURE.md`](docs/INFRASTRUCTURE.md).
+
+## License
+
+[MIT](LICENSE)

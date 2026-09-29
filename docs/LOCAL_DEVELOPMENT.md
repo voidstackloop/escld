@@ -63,7 +63,7 @@ Every application service has a Docker Compose `healthcheck`, and `depends_on: c
 Each service's own directory has its normal toolchain — this is faster for tight edit/rebuild loops than rebuilding a Docker image every time:
 
 - **`backend/`**: Maven (`./mvnw spring-boot:run`), needs the rest of the compose stack running for its dependencies (or point its env vars at your own instances).
-- **`frontend/`**: `npm run dev` (needs `VITE_*` env vars pointed at wherever the backend/ws-sfu/analytics services actually are).
+- **`frontend/`**: `npm install`, then `cp amplify_outputs.example.json amplify_outputs.json`, then `npm run dev` (needs `VITE_*` env vars pointed at wherever the backend/ws-sfu/analytics services actually are). Use `npm install` rather than `npm ci` here: `@aws-amplify/data-construct` and `@aws-amplify/graphql-api-construct` ship bundled OpenTelemetry packages whose versions don't match each other, and `npm ci` rejects that as a lockfile mismatch even when the lockfile is current. Every other Node service works with `npm ci`.
 - **`worker/`, `feed-worker/`, `analytics/`**: `npm run build && npm start`, or `npm run dev` for `tsc --watch`.
 - **`ws-sfu/`**: `cargo run` — but note local rustc may be older than this project's pinned toolchain (the Dockerfile uses `rust:1.94-bookworm`, required by a `sqlx` dependency); building via Docker is the reliable path if your local Rust is older.
 
