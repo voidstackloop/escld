@@ -12,6 +12,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
 import org.springframework.data.redis.cache.RedisCacheManager;
+import org.springframework.data.redis.cache.RedisCacheWriter;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
@@ -67,7 +68,13 @@ class RedisBatchCacheRedisIntegrationTest {
                 .serializeKeysWith(RedisSerializationContext.SerializationPair.fromSerializer(
                         new StringRedisSerializer()))
                 .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(valueSerializer));
-        cacheManager = RedisCacheManager.builder(connectionFactory).cacheDefaults(cacheConfig).build();
+        // Spring Data Redis 4 writes cache puts asynchronously by default, so
+        // a put followed straight by a batch read can race it. These tests are
+        // about the shared key format, not write timing, so write immediately.
+        cacheManager = RedisCacheManager
+                .builder(RedisCacheWriter.create(connectionFactory, writer -> writer.immediateWrites()))
+                .cacheDefaults(cacheConfig)
+                .build();
     }
 
     @AfterAll
