@@ -26,6 +26,6 @@
     "@opentelemetry/context-async-hooks": "^2.8.0",
     "@types/node": "^22.20.1",
     "typescript": "^7.0.2",
-    "vitest": "^3.0.5"
+    "vitest": "^5.0.0"
   }
 }
