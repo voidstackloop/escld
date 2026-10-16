@@ -59,14 +59,25 @@ export class BucketedTrendingStore {
     const prevBuckets = [3, 4, 5, 6, 7, 8, 9, 10, 11].map((d) => current - d);
     const tempKey = `trending:tmp:${entityType}:${current}:${Date.now() % 100000}`;
     try {
-      const args: (string | number)[] = [tempKey, recentBuckets.length + prevBuckets.length];
+      const keys: string[] = [];
+      const weights: number[] = [];
       for (const b of recentBuckets) {
-        args.push(bucketKey(entityType, b), 1);
+        keys.push(bucketKey(entityType, b));
+        weights.push(1);
       }
       for (const b of prevBuckets) {
-        args.push(bucketKey(entityType, b), 0.5);
+        keys.push(bucketKey(entityType, b));
+        weights.push(0.5);
       }
-      args.push("AGGREGATE", "SUM");
+      const args: (string | number)[] = [
+        tempKey,
+        keys.length,
+        ...keys,
+        "WEIGHTS",
+        ...weights,
+        "AGGREGATE",
+        "SUM"
+      ];
       // ZUNIONSTORE with missing keys treats them as empty — safe for cold start.
       await (this.redis.zunionstore as (...a: unknown[]) => Promise<number>)(...args);
       await this.redis.expire(tempKey, 60);

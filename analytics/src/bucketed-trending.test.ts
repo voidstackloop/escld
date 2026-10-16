@@ -63,8 +63,11 @@ describe("bucketed trending", () => {
     await store.getTop("posts", 10, Date.parse("2026-01-01T01:00:00.000Z")).catch(() => undefined);
     expect(first.redis.zunionstore).toHaveBeenCalledOnce();
     const args = (first.redis.zunionstore as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[];
-    // dest + numkeys + 12*(key+weight) + AGGREGATE + SUM
+    // dest + numkeys + 12 keys + WEIGHTS + 12 weights + AGGREGATE + SUM
     expect(args[1]).toBe(12);
+    expect(args[14]).toBe("WEIGHTS");
+    expect(args[27]).toBe("AGGREGATE");
+    expect(args[28]).toBe("SUM");
     expect(second.zsets.size).toBe(0);
   });
 

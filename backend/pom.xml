@@ -28,7 +28,7 @@
 		<url />
 	</scm>
 	<properties>
-		<java.version>25</java.version>
+		<java.version>21</java.version>
 		<aws-sdk.version>2.48.3</aws-sdk.version>
 		<bucket4j.version>8.14.0</bucket4j.version>
 		<testcontainers.version>1.21.3</testcontainers.version>
