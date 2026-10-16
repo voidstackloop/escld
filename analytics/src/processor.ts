@@ -85,6 +85,8 @@ export class AnalyticsProcessor {
       }
       const contribution = trendingContribution(parsed.eventType);
       if (contribution.kind === null) {
+        // Event type doesn't contribute to trending, but might still materialize features (e.g. dwell, progress, unliked)
+        await this.materializeFeatures(parsed);
         payload.resolveOffset(message.offset);
         continue;
       }
@@ -146,12 +148,32 @@ export class AnalyticsProcessor {
       case "post.liked":
         await this.features.recordPositive(viewerId, authorId, tags, 2);
         break;
+      case "post.unliked":
+        await this.features.recordPositiveAdjustment(viewerId, authorId, tags, -2);
+        break;
       case "post.commented":
         await this.features.recordPositive(viewerId, authorId, tags, 3);
         break;
       case "user.followed":
         await this.features.recordPositive(viewerId, authorId, [], 4);
         break;
+      case "user.unfollowed":
+        await this.features.recordPositiveAdjustment(viewerId, authorId, [], -4);
+        break;
+      case "post.dwell": {
+        const activeDwellMs = typeof parsed.payload.activeDwellMs === "number" ? parsed.payload.activeDwellMs : 0;
+        if (activeDwellMs >= 10000) {
+          await this.features.recordPositive(viewerId, authorId, tags, 1);
+        }
+        break;
+      }
+      case "media.progress": {
+        const progress = typeof parsed.payload.progress === "number" ? parsed.payload.progress : 0;
+        if (progress >= 0.5) {
+          await this.features.recordPositive(viewerId, authorId, tags, 1);
+        }
+        break;
+      }
       case "post.hidden":
         await this.features.recordHide(viewerId, authorId, tags);
         break;

@@ -42,6 +42,25 @@ export class FeatureMaterializer {
     await this.trim(`features:topic:pos:${viewerId}`);
   }
 
+  /** Reversal adjustments: reduce positive evidence when a like or follow is undone. */
+  async recordPositiveAdjustment(viewerId: string, authorId: string | null, topics: string[], delta: number): Promise<void> {
+    if (delta >= 0) return;
+    const pipeline = this.redis.pipeline();
+    if (authorId) {
+      pipeline.zincrby(`features:author:pos:${viewerId}`, delta, authorId);
+      pipeline.expire(`features:author:pos:${viewerId}`, AFFINITY_TTL_SECONDS);
+    }
+    for (const topic of topics.slice(0, 10)) {
+      pipeline.zincrby(`features:topic:pos:${viewerId}`, delta, topic.toLowerCase());
+      pipeline.expire(`features:topic:pos:${viewerId}`, AFFINITY_TTL_SECONDS);
+    }
+    await pipeline.exec();
+    await this.clampNonNegative(`features:author:pos:${viewerId}`, authorId);
+    for (const topic of topics.slice(0, 10)) {
+      await this.clampNonNegative(`features:topic:pos:${viewerId}`, topic.toLowerCase());
+    }
+  }
+
   /** Hide evidence: separate negative counters, never subtracted embeddings. */
   async recordHide(viewerId: string, authorId: string | null, topics: string[]): Promise<void> {
     const pipeline = this.redis.pipeline();
@@ -90,6 +109,14 @@ export class FeatureMaterializer {
 
   async hasSeen(viewerId: string, postId: string): Promise<boolean> {
     return (await this.redis.sismember(`features:seen:${viewerId}`, postId)) === 1;
+  }
+
+  private async clampNonNegative(key: string, member: string | null): Promise<void> {
+    if (!member) return;
+    const score = await this.redis.zscore(key, member);
+    if (score !== null && Number.parseFloat(score) < 0) {
+      await this.redis.zadd(key, 0, member);
+    }
   }
 
   private async trim(key: string): Promise<void> {

@@ -170,4 +170,38 @@ describe("AnalyticsProcessor", () => {
     expect(trending.record).not.toHaveBeenCalled();
     expect(batch.resolveOffset).toHaveBeenCalledWith("0");
   });
+
+  it("materializes features for post.unliked, user.unfollowed, post.dwell, and media.progress", async () => {
+    const { redis, trending } = makeDeps();
+    const recordPositive = vi.fn().mockResolvedValue(undefined);
+    const recordPositiveAdjustment = vi.fn().mockResolvedValue(undefined);
+    const features = {
+      recordSeen: vi.fn(),
+      recordPositive,
+      recordPositiveAdjustment,
+      recordHide: vi.fn(),
+    };
+    const processor = new AnalyticsProcessor(
+      {} as never,
+      redis as never,
+      { groupId: "test", topics: ["behavior.events.v2"] },
+      trending as never,
+      new (await import("./receipts.js")).ReceiptStore(redis as never),
+      features as never
+    );
+
+    const events = [
+      envelope("evt-unliked", { eventType: "post.unliked", payload: { postId: "post-1", authorId: "author-1", tags: ["tech"] } }),
+      envelope("evt-unfollowed", { eventType: "user.unfollowed", payload: { followeeId: "author-2" } }),
+      envelope("evt-dwell", { eventType: "post.dwell", payload: { postId: "post-1", activeDwellMs: 12000, authorId: "author-1" } }),
+      envelope("evt-progress", { eventType: "media.progress", payload: { postId: "post-1", progress: 0.8, authorId: "author-1" } }),
+    ];
+
+    await processor.handleBatch(makeBatch(events));
+
+    expect(recordPositiveAdjustment).toHaveBeenCalledWith("user-1", "author-1", ["tech"], -2);
+    expect(recordPositiveAdjustment).toHaveBeenCalledWith("user-1", "author-2", [], -4);
+    expect(recordPositive).toHaveBeenCalledWith("user-1", "author-1", [], 1);
+    expect(recordPositive).toHaveBeenCalledWith("user-1", "author-1", [], 1);
+  });
 });

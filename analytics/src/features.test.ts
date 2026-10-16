@@ -31,6 +31,12 @@ function makeRedis() {
       };
     }),
     zcard: vi.fn(async (key: string) => zsets.get(key)?.size ?? 0),
+    zadd: vi.fn(async (key: string, score: number, member: string) => {
+      const set = zsets.get(key) ?? new Map<string, number>();
+      set.set(member, score);
+      zsets.set(key, set);
+      return 0;
+    }),
     zremrangebyrank: vi.fn(async () => 0),
     zscore: vi.fn(async (key: string, member: string) => {
       const v = zsets.get(key)?.get(member);
@@ -51,6 +57,20 @@ describe("FeatureMaterializer", () => {
     const features = new FeatureMaterializer(redis);
     await features.recordPositive("viewer-1", "author-1", ["rust"], 99);
     expect(zsets.get("features:author:pos:viewer-1")?.get("author-1")).toBe(5);
+  });
+
+  it("adjusts positive evidence for unliked/unfollowed and clamps to non-negative", async () => {
+    const { redis, zsets } = makeRedis();
+    const features = new FeatureMaterializer(redis);
+    await features.recordPositive("viewer-1", "author-1", ["rust"], 2);
+    expect(zsets.get("features:author:pos:viewer-1")?.get("author-1")).toBe(2);
+
+    await features.recordPositiveAdjustment("viewer-1", "author-1", ["rust"], -2);
+    expect(zsets.get("features:author:pos:viewer-1")?.get("author-1")).toBe(0);
+
+    // Over-reduction clamps at 0
+    await features.recordPositiveAdjustment("viewer-1", "author-1", ["rust"], -2);
+    expect(zsets.get("features:author:pos:viewer-1")?.get("author-1")).toBe(0);
   });
 
   it("keeps hide evidence separate from positive affinity", async () => {
